@@ -1,0 +1,54 @@
+---
+title: "Riftmap API rate limits — thresholds and retry guidance"
+description: "Understand the two rate limiting layers applied to the Riftmap API — per-IP limits on auth endpoints and per-identity limits on authenticated mutations."
+---
+
+The Riftmap API enforces two complementary rate limiting layers. The first targets unauthenticated endpoints to protect against brute-force and abuse. The second applies to all authenticated write operations across your entire workspace identity. Both layers return a standard `429` response with a `Retry-After` header so you can back off and retry automatically.
+
+## Unauthenticated endpoint limits
+
+The following endpoints are rate-limited per IP address:
+
+| Endpoint | Limit |
+|---|---|
+| `POST /auth/login` | 5 per 15 minutes |
+| `POST /auth/register` | 5 per hour |
+| `POST /auth/password/reset/request` | 3 per hour |
+| `POST /auth/password/reset/confirm` | 10 per hour |
+| `POST /auth/email/verify/resend` | 3 per hour |
+| `POST /invitations/{token}/accept` | 10 per hour |
+
+## Authenticated mutation limits
+
+All authenticated `POST`, `PUT`, `PATCH`, and `DELETE` requests share a single limit:
+
+| Scope | Limit |
+|---|---|
+| All authenticated mutations (per user or API key) | 60 per minute |
+
+The identity key is your user account (for session auth) or your API key (for API key auth). This limit is per identity, not per endpoint — 60 total write requests per minute across all endpoints.
+
+## 429 response
+
+When you exceed a limit, the API responds with `429 Too Many Requests`:
+
+```json
+{
+  "detail": "Too many requests. Try again in N seconds.",
+  "retry_after": N
+}
+```
+
+The response also includes a `Retry-After` header with the same value in seconds.
+
+<Tip>
+  Read the `Retry-After` header directly from `429` responses to know exactly when to retry. Both `Retry-After` and `X-Request-ID` are included in `Access-Control-Expose-Headers`, so browser `fetch()` calls can read them without additional configuration.
+</Tip>
+
+## Endpoints with no rate limit
+
+`GET /health` has no rate limit and can be polled freely to monitor API availability.
+
+## Self-hosted deployments
+
+All rate limiting thresholds are configurable via `RATELIMIT_*` environment variables in your deployment configuration. If you run a self-hosted instance, you can tune or disable limits to match your environment's requirements.

@@ -1,0 +1,127 @@
+---
+title: "Run blast-radius impact analysis before shipping a change"
+description: "Query the full downstream blast radius of any repository change — via the graph UI or the REST API — before you merge or deploy."
+---
+
+Impact analysis answers the question Riftmap was built for: *if I change repo X, what else breaks?* Riftmap traces every downstream dependency chain from a repository and returns a ranked list of affected repos, grouped by how many hops away they sit. You can run impact analysis interactively in the graph UI or programmatically via the API from a CI pipeline or script.
+
+## Using the graph UI
+
+The graph page has a dedicated **Impact Mode** that highlights the full downstream blast radius of any repository.
+
+<Steps>
+  <Step title="Open the graph">
+    Go to **Graph** in the left sidebar. Your org's full dependency graph loads automatically.
+  </Step>
+  <Step title="Find your repository">
+    Type the repository name in the search bar (keyboard shortcut `/`) to jump directly to it. The graph centers and highlights the matching node.
+  </Step>
+  <Step title="Activate Impact Mode">
+    Click the repository node to select it, then click **Impact Mode** in the toolbar (or right-click the node and choose **Show impact**). Nodes are highlighted by depth — direct dependents appear brightest, deeper dependents appear progressively dimmer.
+  </Step>
+  <Step title="Inspect affected repositories">
+    Hover over any highlighted node to see its name, team, and the dependency path from your source repo. The detail panel on the right lists all impacted repositories sorted by depth.
+  </Step>
+  <Step title="Exit Impact Mode">
+    Press **Escape** or click **Exit Impact Mode** in the toolbar to return to the full graph view.
+  </Step>
+</Steps>
+
+<Tip>
+  Use **Focus Mode** before activating Impact Mode to narrow the canvas to a single repo's immediate neighbors first. This is useful for dense graphs where you want to confirm the direct dependency picture before tracing the full blast radius.
+</Tip>
+
+## Using the API
+
+The impact endpoint runs a full BFS traversal from the specified repository and returns every downstream repo, the depth at which it appears, and the dependency path.
+
+### Get the blast radius
+
+```bash
+curl -H "X-API-Key: rfm_live_..." \
+  "https://api.riftmap.dev/api/v1/repositories/{id}/impact?max_depth=10"
+```
+
+**Response:**
+
+```json
+{
+  "repository_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "impacted_repositories": [
+    {
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "name": "infra/vpc",
+      "depth": 1,
+      "path": ["platform/tf-modules", "infra/vpc"]
+    },
+    {
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "name": "services/payments",
+      "depth": 2,
+      "path": ["platform/tf-modules", "infra/vpc", "services/payments"]
+    }
+  ],
+  "total_count": 5
+}
+```
+
+<Tip>
+  Use the `max_depth` query parameter to control how many hops to traverse. The default is `10`, which covers virtually all real-world dependency chains. Set it lower (e.g. `max_depth=2`) for a quick first-degree + second-degree check in a CI gate.
+</Tip>
+
+### Inspect direct dependencies
+
+To see only what a repository directly depends on (one level down):
+
+```bash
+curl -H "X-API-Key: rfm_live_..." \
+  "https://api.riftmap.dev/api/v1/repositories/{id}/dependencies"
+```
+
+Each row includes the source file, line number, dependency type, version constraint, and whether the declaration was resolved to a known repository or artifact.
+
+### Inspect direct dependents
+
+To see which repositories directly depend on yours (one level up):
+
+```bash
+curl -H "X-API-Key: rfm_live_..." \
+  "https://api.riftmap.dev/api/v1/repositories/{id}/dependents"
+```
+
+### Run impact check in CI
+
+A common pattern is to trigger an impact check as part of a pull request workflow. Fetch the repository ID once from the org's repository list, then query impact on every relevant branch push:
+
+<CodeGroup>
+
+```bash Shell
+curl -s \
+  -H "X-API-Key: rfm_live_..." \
+  "https://api.riftmap.dev/api/v1/repositories/${REPO_ID}/impact?max_depth=5" \
+  | jq '.total_count'
+```
+
+```python Python
+import httpx
+
+REPO_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+API_KEY = "rfm_live_..."
+
+resp = httpx.get(
+    f"https://api.riftmap.dev/api/v1/repositories/{REPO_ID}/impact",
+    headers={"X-API-Key": API_KEY},
+    params={"max_depth": 5},
+)
+resp.raise_for_status()
+data = resp.json()
+print(f"{data['total_count']} repositories impacted")
+for repo in data["impacted_repositories"]:
+    print(f"  depth={repo['depth']}  {repo['name']}")
+```
+
+</CodeGroup>
+
+<Note>
+  The impact endpoint traces only repositories within your connected org. Dependencies on external packages (PyPI, Docker Hub, etc.) that haven't been resolved to an internal repository will not appear in the blast radius.
+</Note>

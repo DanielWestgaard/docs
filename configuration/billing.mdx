@@ -1,0 +1,117 @@
+---
+title: "Riftmap subscription plans, limits, and billing management"
+description: "Understand Riftmap's free and paid plans, how plan limits are enforced, and how to upgrade, manage seats, export your data, or cancel your subscription."
+---
+
+Riftmap offers a free plan and paid plans (Team and Business) with higher repository, seat, and org connection limits. Limits are enforced at the API level — when you hit a limit, you receive a `402 Payment Required` response with an upgrade hint rather than a silent failure. This page covers what each plan includes and how to manage your subscription.
+
+## Plan overview
+
+| Plan | Repositories | Seats | Org connections |
+|---|---|---|---|
+| **Free** | 15 | 1 | 1 |
+| **Team** | 100 | 5 + add-ons | 1 |
+| **Business** | 500 | 15 + add-ons | Unlimited |
+
+<Note>
+  If you are running a self-hosted Riftmap deployment without a Stripe key configured, billing is disabled and no plan limits are enforced. See [Configure a self-hosted Riftmap deployment](/configuration/environment).
+</Note>
+
+## How limits are enforced
+
+Riftmap checks plan limits at the moment you take an action — not retroactively. Existing data is never automatically deleted when you downgrade.
+
+| Action | Enforcement point |
+|---|---|
+| Connect an org | Blocked at the moment of connection if you are at your org connection limit |
+| Invite a member | Blocked when the invitation is accepted if you are at your seat limit |
+| Trigger a scan | Blocked at the moment of trigger if your total repository count exceeds the plan limit |
+
+When a limit is reached, the API returns `402` with a human-readable message and an `upgrade_url`. The web app surfaces this as an in-line upgrade prompt rather than a generic error.
+
+<Tip>
+  If you are over a limit after a downgrade (for example, you have more connected orgs than your new plan allows), Riftmap shows a warning banner in **Settings → Billing** but does not delete your data. You can manually disconnect orgs or remove members to come back within limits.
+</Tip>
+
+## View your current plan and usage
+
+<Tabs>
+  <Tab title="Web app">
+    Go to **Settings → Billing**. You will see your current plan, usage bars for repositories, seats, and org connections, and the next billing date.
+  </Tab>
+  <Tab title="API">
+    ```bash
+    GET /api/v1/workspaces/{id}/billing
+    ```
+
+    Returns your plan, seat counts, `cancel_at` (if a cancellation is pending), and whether you are over any limits (`over_seat_limit`, `over_org_limit`, `over_repo_limit`). Requires owner role.
+
+    For a detailed breakdown of usage vs. plan limits:
+
+    ```bash
+    GET /api/v1/workspaces/{id}/billing/usage
+    ```
+  </Tab>
+</Tabs>
+
+## Upgrade your plan
+
+<Tabs>
+  <Tab title="Web app">
+    Go to **Settings → Billing → Upgrade Plan**. Select Team or Business and complete the Stripe Checkout flow. Your plan is activated as soon as payment succeeds.
+  </Tab>
+  <Tab title="API">
+    ```bash
+    POST /api/v1/workspaces/{id}/billing/checkout
+    Content-Type: application/json
+
+    { "plan": "team" }
+    ```
+
+    Returns `{ "checkout_url": "..." }`. Redirect your user to `checkout_url` to complete payment. Requires owner role.
+  </Tab>
+</Tabs>
+
+## Manage seats
+
+Seat add-ons let you increase your seat count beyond the plan default without switching to a higher plan.
+
+<Steps>
+  <Step title="Add seats">
+    In the app: go to **Settings → Billing → Seats → Add seats**. Via API: `POST /workspaces/{id}/billing/seats` with body `{ "additional_seats": N }`.
+  </Step>
+  <Step title="Remove seats">
+    In the app: **Settings → Billing → Seats → Remove seats**. Via API: `DELETE /workspaces/{id}/billing/seats` with body `{ "seats_to_remove": N }`. If removing seats would put your workspace over the new limit, you will be asked to select members to remove first.
+  </Step>
+</Steps>
+
+## Cancel your subscription
+
+Cancelling sets `cancel_at_period_end` on your Stripe subscription. Your workspace keeps full access until the end of the current billing period — there is no immediate termination.
+
+<Steps>
+  <Step title="Cancel in the app">
+    Go to **Settings → Billing → Cancel subscription**. You can optionally provide a cancellation reason.
+  </Step>
+  <Step title="Resume before the period ends">
+    Changed your mind? Go to **Settings → Billing → Resume subscription** any time before the cancellation date. Via API: `POST /workspaces/{id}/billing/resume`.
+  </Step>
+</Steps>
+
+<Note>
+  After cancellation takes effect, your workspace reverts to the free plan limits (15 repos, 1 seat, 1 org connection). Your data is not deleted.
+</Note>
+
+## Export your workspace data (GDPR)
+
+You can export all workspace data as a JSON file at any time. The export includes members, connected orgs (without access tokens), repositories, scans, dependency declarations, and graph edges.
+
+```bash
+GET /api/v1/workspaces/{id}/export
+```
+
+The response is a downloadable JSON attachment. This endpoint requires owner or admin role and is rate-limited to one export per workspace per hour.
+
+<Warning>
+  If you call this endpoint more than once within an hour, you will receive a `429 Too Many Requests` response. Wait until the hour window resets before requesting another export.
+</Warning>

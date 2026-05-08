@@ -1,0 +1,242 @@
+---
+title: "Workspace API endpoints — members, API keys, invitations"
+description: "Manage workspace settings, members and roles, API keys, invitations, ownership transfers, and GDPR data exports through the Riftmap workspaces API."
+---
+
+A workspace is Riftmap's billing and access boundary. Every user starts with a personal workspace created at registration. You can invite team members, assign roles (`owner > admin > member`), and create workspace-scoped API keys for CI pipelines and scripts. API keys are Owner-equivalent within their workspace and bypass role checks.
+
+## Endpoint overview
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/workspaces` | List workspaces for the current user or API key |
+| POST | `/workspaces` | Create a new free workspace (session auth only) |
+| POST | `/workspaces/create-with-checkout` | Create a workspace and open a Stripe Checkout session (session auth only) |
+| GET | `/workspaces/{id}` | Get workspace details |
+| PATCH | `/workspaces/{id}` | Update workspace name |
+| DELETE | `/workspaces/{id}` | Delete workspace and all data (owner only) |
+| GET | `/workspaces/{id}/members` | List members and roles (paginated) |
+| PATCH | `/workspaces/{id}/members/{user_id}` | Change a member's role |
+| DELETE | `/workspaces/{id}/members/{user_id}` | Remove a member |
+| POST | `/workspaces/{id}/transfer` | Transfer workspace ownership (session auth only) |
+| GET | `/workspaces/{id}/invitations` | List active invitations |
+| POST | `/workspaces/{id}/invitations` | Create an email or link invitation |
+| DELETE | `/workspaces/{id}/invitations/{inv_id}` | Revoke an invitation |
+| GET | `/workspaces/{id}/api-keys` | List API keys (prefixes only — raw key never shown again) |
+| POST | `/workspaces/{id}/api-keys` | Create a new API key (raw key shown once) |
+| DELETE | `/workspaces/{id}/api-keys/{key_id}` | Revoke an API key |
+| GET | `/workspaces/{id}/export` | GDPR data export as JSON attachment |
+| GET | `/workspaces/{id}/oauth-orgs/{provider}` | List OAuth orgs accessible via linked identity (session auth only) |
+
+---
+
+## Listing workspaces
+
+`GET /workspaces` is paginated. Use the `limit` (default `100`, max `500`) and `offset` query parameters to page through results. The total item count is in the `X-Total-Count` response header.
+
+<CodeGroup>
+
+```bash curl
+curl -H "X-API-Key: rfm_live_..." \
+  "https://api.riftmap.dev/api/v1/workspaces?limit=20&offset=0"
+```
+
+</CodeGroup>
+
+---
+
+## Getting a workspace
+
+<CodeGroup>
+
+```bash curl
+curl -H "X-API-Key: rfm_live_..." \
+  https://api.riftmap.dev/api/v1/workspaces/WORKSPACE_ID
+```
+
+</CodeGroup>
+
+---
+
+## Members
+
+### List members
+
+`GET /workspaces/{id}/members` returns a paginated list of all workspace members and their roles. The `X-Total-Count` header contains the total member count.
+
+### Change a member's role
+
+`PATCH /workspaces/{id}/members/{user_id}` — available to owners and admins.
+
+```json
+{ "role": "admin" }
+```
+
+### Remove a member
+
+`DELETE /workspaces/{id}/members/{user_id}` removes a member from the workspace.
+
+### Last-owner invariant
+
+A workspace must always have at least one owner. These operations are blocked with the errors shown:
+
+| Operation | Error |
+|-----------|-------|
+| Demote the last owner via `PATCH /members/{user_id}` | `409` — transfer ownership first |
+| Remove the last owner via `DELETE /members/{user_id}` | `400` — use `/leave` |
+| Leave as the last owner | `409` — transfer ownership before leaving |
+
+Use `POST /workspaces/{id}/transfer` to atomically promote a new owner and step down before demoting or leaving.
+
+---
+
+## Transferring ownership
+
+`POST /workspaces/{id}/transfer` atomically promotes the target member to Owner and demotes the caller to Admin. Session auth only.
+
+### Request body
+
+<ParamField body="new_owner_id" type="string" required>
+  UUID of the workspace member who will become the new owner.
+</ParamField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://api.riftmap.dev/api/v1/workspaces/WORKSPACE_ID/transfer \
+  -H "Content-Type: application/json" \
+  -d '{ "new_owner_id": "USER_UUID" }'
+```
+
+</CodeGroup>
+
+Returns `400` on a self-transfer, `409` if the target is already the owner.
+
+---
+
+## Invitations
+
+### Create an invitation
+
+`POST /workspaces/{id}/invitations` supports two flavours: a single-use **email invitation** (7-day expiry) and a shareable **link invitation** (30-day expiry with a configurable use limit).
+
+<Note>
+Creating an invitation returns `403` if your email address is unverified. API key auth is exempt from this check.
+</Note>
+
+**Email invitation:**
+
+<ParamField body="type" type="string" required>
+  Must be `"email"`.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  The recipient's email address.
+</ParamField>
+
+<ParamField body="role" type="string">
+  Role to assign on acceptance: `admin` or `member`. Defaults to `member`.
+</ParamField>
+
+```json
+{ "type": "email", "email": "colleague@company.com", "role": "member" }
+```
+
+**Link invitation:**
+
+<ParamField body="type" type="string" required>
+  Must be `"link"`.
+</ParamField>
+
+<ParamField body="max_uses" type="number">
+  Maximum number of times the link can be accepted. Omit for unlimited uses.
+</ParamField>
+
+<ParamField body="role" type="string">
+  Role to assign on acceptance: `admin` or `member`. Defaults to `member`.
+</ParamField>
+
+```json
+{ "type": "link", "max_uses": 10, "role": "member" }
+```
+
+The seat limit is enforced when each invitation is accepted — not when it is created.
+
+---
+
+## API keys
+
+### List API keys
+
+`GET /workspaces/{id}/api-keys` returns the key prefix and hash for each key. The raw key value is **never** returned again after creation.
+
+### Create an API key
+
+`POST /workspaces/{id}/api-keys` generates a new key and returns the raw value **once**. Store it securely immediately — you cannot retrieve it again.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://api.riftmap.dev/api/v1/workspaces/WORKSPACE_ID/api-keys \
+  -H "X-API-Key: rfm_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "CI Pipeline" }'
+```
+
+</CodeGroup>
+
+### Revoke an API key
+
+`DELETE /workspaces/{id}/api-keys/{key_id}` immediately invalidates the key.
+
+<Warning>
+`POST /workspaces/{id}/api-key/regenerate` is deprecated. Use `POST /workspaces/{id}/api-keys` to create additional keys instead.
+</Warning>
+
+---
+
+## GDPR data export
+
+`GET /workspaces/{id}/export` returns a JSON file attachment containing all workspace data: members, API key prefixes (no raw keys), invitations, connected orgs (no access tokens), repos, scans, dependency declarations, resolved edges, and artifacts.
+
+Requires owner or admin role. Rate-limited to one export per workspace per hour — a second request within the hour returns `429`.
+
+<CodeGroup>
+
+```bash curl
+curl -H "X-API-Key: rfm_live_..." \
+  https://api.riftmap.dev/api/v1/workspaces/WORKSPACE_ID/export \
+  -o riftmap-export.json
+```
+
+</CodeGroup>
+
+---
+
+## OAuth org picker
+
+`GET /workspaces/{id}/oauth-orgs/{provider}` lists the GitHub organisations or GitLab groups accessible via your linked OAuth identity. Session auth only — returns `403` for API key auth.
+
+```json
+[
+  {
+    "login": "my-org",
+    "name": "My Org",
+    "url": "https://github.com/my-org",
+    "avatar_url": "https://avatars.githubusercontent.com/...",
+    "scannable": false
+  }
+]
+```
+
+<ResponseField name="login" type="string">
+  Pass this value as `oauth_org_login` when calling `POST /connected-orgs` in OAuth mode. For GitLab subgroups, the full path is used (e.g. `"group/subgroup"`).
+</ResponseField>
+
+<ResponseField name="scannable" type="boolean">
+  `true` when your OAuth token carries the scopes needed to scan this org's repositories. GitHub entries are `scannable: true` only when your token includes `repo` or `public_repo`. GitLab entries are always `true`. Use a PAT for GitHub orgs where `scannable` is `false`.
+</ResponseField>
+
+<Note>
+If the upstream provider rejects the request with a `401` (common with GitLab's 2-hour token TTL), Riftmap transparently refreshes the token and retries once. If the refresh itself fails, the endpoint returns `401` with `WWW-Authenticate: OAuth realm="<provider>"`, prompting you to re-link your account.
+</Note>

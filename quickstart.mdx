@@ -1,0 +1,101 @@
+---
+title: "Get started: connect your org and run your first scan"
+description: "Create an account, connect your GitHub org or GitLab group, run your first scan, and explore your dependency graph — all in under 5 minutes."
+---
+
+This guide walks you through creating a Riftmap account, connecting your first organization, and running a scan. By the end, you'll have a live dependency graph and be able to run your first impact query.
+
+<Steps>
+  <Step title="Create your account">
+    Go to [app.riftmap.dev](https://app.riftmap.dev) and click **Sign up**. Fill in your email address, choose a password, accept the terms of service, and click **Create account**.
+
+    Riftmap sends a verification email to the address you provided. Open it and click **Verify email** before continuing — the onboarding wizard requires a verified email address to proceed.
+
+    <Tip>
+      You can also sign up with your GitHub or GitLab account using the OAuth buttons on the sign-up page. This links your identity and makes connecting an org via OAuth faster.
+    </Tip>
+  </Step>
+
+  <Step title="Complete the onboarding wizard">
+    After verifying your email, you're taken to the onboarding wizard. It has two steps:
+
+    1. **Name your workspace.** A workspace is the billing and access boundary for your team. Give it a name that reflects your organization (for example, "Acme Engineering"). You can rename it later in Settings.
+    2. **Confirm setup.** Review the workspace details and click **Continue**.
+
+    Once you finish, you land on the Riftmap dashboard. Your workspace is ready but has no connected organizations yet.
+  </Step>
+
+  <Step title="Connect your first org">
+    From the dashboard, click **Connect org**. You'll be prompted to choose between GitHub and GitLab and to provide either a Personal Access Token (PAT) or connect via OAuth.
+
+    **PAT mode** (recommended for automation and API access): paste a read-only token and your org URL. See [Connect a GitHub org or GitLab group](/connect-org) for the exact scopes required.
+
+    **OAuth mode**: if you signed up with GitHub or GitLab, click **Connect with OAuth**, pick your organization from the picker, and confirm. Riftmap uses your linked identity — no token to copy.
+
+    Once you submit, your connected org appears on the dashboard with a status of **Not yet scanned**.
+
+    <Note>
+      You can connect multiple organizations to the same workspace. Each org is scanned independently and appears as a separate entry on the dashboard.
+    </Note>
+  </Step>
+
+  <Step title="Run your first scan">
+    Click the org you just connected, then click **Run scan**. Riftmap queues a full scan immediately.
+
+    While the scan runs, the status updates in real time:
+
+    - **Enumerating repositories** — Riftmap lists every repo in your org.
+    - **Scanning** — workers clone each repository, parse dependency files, and resolve cross-repo references.
+    - **Completed** — the graph is ready to explore.
+
+    Scan time depends on org size. A 50-repo org typically completes in under two minutes. Subsequent scans use incremental mode by default, skipping repositories whose code hasn't changed, so they're faster.
+
+    <Tip>
+      If the scan finishes with some repositories marked as **failed**, it usually means those repos had no parseable dependency files or were empty. This is normal and doesn't affect other repositories in the scan.
+    </Tip>
+  </Step>
+
+  <Step title="Explore the dependency graph">
+    Once the scan completes, click **View graph** to open the interactive dependency graph. Every node is a repository; every edge is a dependency relationship, color-coded by ecosystem.
+
+    A few things to try:
+
+    - **Search** — press `/` or click the search bar at the top of the graph to jump to a specific repository by name.
+    - **Focus Mode** — click any node, then click **Focus** in the detail panel on the right. The graph narrows to show only that repository, its direct dependencies, and its direct dependents.
+    - **Impact analysis** — with a repository selected, click **Impact** in the detail panel. Riftmap runs a downstream traversal and highlights every repository that would be affected by a change to the selected repo, at each dependency depth.
+
+    **Finding impact analysis results**
+
+    After running an impact query, the detail panel shows:
+
+    - The total number of downstream repositories affected
+    - A depth-by-depth breakdown (direct dependents, then their dependents, and so on)
+    - The dependency types connecting each hop (for example, `terraform_module`, `docker_base_image`)
+
+    You can also query impact programmatically via the REST API:
+
+    ```bash
+    curl https://api.riftmap.dev/api/v1/repositories/{id}/impact \
+      -H "X-API-Key: rfm_live_..."
+    ```
+
+    See [Impact Analysis](/guides/impact-analysis) for a full guide, including how to read the results and how to use impact queries in CI pipelines.
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Connect an org" icon="plug" href="/connect-org">
+    Set up PAT scopes or configure OAuth for additional orgs.
+  </Card>
+  <Card title="Impact analysis" icon="bolt" href="/guides/impact-analysis">
+    Run blast-radius queries from the UI and the API.
+  </Card>
+  <Card title="API keys" icon="key" href="/guides/api-keys">
+    Create API keys for CI pipelines and integrations.
+  </Card>
+  <Card title="API reference" icon="code" href="/api/overview">
+    Full REST API documentation.
+  </Card>
+</CardGroup>

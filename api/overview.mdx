@@ -1,0 +1,79 @@
+---
+title: "Riftmap REST API — base URL, auth, and resource groups"
+description: "A complete reference for the Riftmap REST API. Build integrations, automate scans, and query your dependency graph programmatically."
+---
+
+The Riftmap REST API gives you programmatic access to every resource in your workspace — from triggering scans to querying the full dependency graph. All endpoints accept and return JSON and are designed to work from CI pipelines, scripts, or any HTTP client.
+
+## Base URL
+
+All API requests use the following base URL:
+
+```
+https://api.riftmap.dev/api/v1
+```
+
+Every endpoint path in this reference is relative to this base. For example, the workspaces endpoint is `https://api.riftmap.dev/api/v1/workspaces`.
+
+## Content type
+
+All request and response bodies use JSON. Set `Content-Type: application/json` on any request that includes a body.
+
+## Interactive documentation
+
+Swagger UI is available at `/docs` and ReDoc at `/redoc` on Riftmap instances where it has been enabled. The raw OpenAPI schema is also available at `/openapi.json`.
+
+## Authentication
+
+Include your workspace API key in every request using the `X-API-Key` header:
+
+```bash
+curl -H "X-API-Key: rfm_live_YOUR_KEY" \
+  https://api.riftmap.dev/api/v1/workspaces
+```
+
+See [Authentication](/api/authentication) for the full details, including an alternative `Authorization: Bearer` header format and which endpoints require browser-based session auth.
+
+## Response headers
+
+Two headers appear on every API response:
+
+<ResponseField name="X-Request-ID" type="string">
+  A unique identifier for each request. Include this value when contacting support — it lets the team trace your request through the system logs.
+</ResponseField>
+
+<ResponseField name="X-Total-Count" type="integer">
+  Present on paginated list responses. Contains the total number of matching rows regardless of the current page. Use this to compute total pages without a separate request.
+</ResponseField>
+
+## Minimal working example
+
+The following request lists all workspaces accessible to your API key:
+
+```bash
+curl -H "X-API-Key: rfm_live_..." \
+  https://api.riftmap.dev/api/v1/workspaces
+```
+
+## Resource groups
+
+The API is organized into the following resource groups:
+
+| Group | Description |
+|---|---|
+| **Auth** | Register, log in, manage sessions, OAuth flows, and account settings |
+| **Workspaces** | Create and manage workspaces, members, invitations, and API keys |
+| **Connected Orgs** | Register GitHub orgs or GitLab groups and manage their access tokens |
+| **Scans** | Trigger scans, check scan status, and cancel running scans |
+| **Repositories** | Query individual repository details, dependencies, and dependents |
+| **Artifacts** | Browse artifacts your org produces and see which repos consume them |
+| **Graph** | Fetch the full dependency graph as nodes and edges |
+| **Billing** | Manage plans, seats, payment methods, and subscription lifecycle |
+
+## Pagination
+
+List endpoints that can return large result sets support offset-based pagination via `limit` and `offset` query parameters. See [Pagination](/api/pagination) for full details.
+
+## Rate limits
+
+The API enforces per-IP limits on unauthenticated endpoints and a 60-per-minute limit on authenticated mutations. See [Rate limits](/api/rate-limits) for the full breakdown and retry guidance.

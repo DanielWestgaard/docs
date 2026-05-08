@@ -1,0 +1,51 @@
+---
+title: "Supported dependency ecosystems and file types in Riftmap"
+description: "Every ecosystem Riftmap parses — Terraform, Docker, Python, GitHub Actions, GitLab CI, Ansible, Helm, Go, npm, Kustomize, Kubernetes, and ArgoCD."
+---
+
+Riftmap discovers dependencies across every major infrastructure and application ecosystem in a single pass — no per-repo configuration required. For each ecosystem, a dedicated parser reads the relevant manifest files and extracts dependency declarations. The `dependency_type` string on each edge and declaration tells you which ecosystem a relationship comes from.
+
+The table below lists every supported ecosystem, the files each parser reads, and the `dependency_type` identifier(s) produced.
+
+## Ecosystem reference
+
+| Ecosystem | Files parsed | Dependency type(s) |
+|---|---|---|
+| **Terraform** | `*.tf` — `module` blocks | `terraform_module` |
+| **Docker** | `Dockerfile` (`FROM`), `docker-compose.yml` (`image:`), Kubernetes pod specs (container images), Kustomize image patches | `docker_base_image` |
+| **Python** | `requirements.txt`, `pyproject.toml`, `setup.cfg`, `setup.py` | `python_package` |
+| **GitLab CI** | `.gitlab-ci.yml` — `include:` / `trigger:` | `gitlab_ci_include` |
+| **GitLab CI** | `.gitlab-ci.yml` — `image:` | `gitlab_ci_image` |
+| **GitHub Actions** | `.github/workflows/*.yml` — `uses: org/repo@ref` (composite or JavaScript actions) | `github_actions_action` |
+| **GitHub Actions** | `.github/workflows/*.yml` — `uses: org/repo/.github/workflows/*.yml@ref` (reusable workflows) | `github_actions_reusable_workflow` |
+| **Ansible** | `requirements.yml`, `galaxy.yml` — roles | `ansible_role` |
+| **Ansible** | `requirements.yml`, `galaxy.yml` — collections | `ansible_collection` |
+| **Helm** | `Chart.yaml` — `dependencies` block | `helm_chart_dependency` |
+| **Helm** | CI scripts, Terraform `helm_release` — `helm upgrade/install` invocations | `helm_chart_reference` |
+| **Go** | `go.mod` — `require` and `replace` directives | `go_module` |
+| **npm** | `package.json` — `dependencies`, `devDependencies`, `peerDependencies` | `npm_package` |
+| **Kustomize** | `kustomization.yaml` — `resources` and `images` | `kustomize_resource` |
+| **Kubernetes** | Plain Kubernetes manifests — container `image:` fields | `kubernetes_image` |
+| **ArgoCD** | ArgoCD `Application` and `ApplicationSet` — `spec.source.repoURL` | `argocd_app_source` |
+
+## Heuristic scanning
+
+In addition to the ecosystem-specific parsers, Riftmap runs a heuristic scanner over every file in each repository. The heuristic scanner looks for dependency-like patterns that formal parsers may miss — for example, image references embedded in shell scripts, inline CI invocations outside standard workflow files, or non-standard manifest layouts.
+
+<Note>
+Edges produced by the heuristic scanner carry a confidence score below 1.0, indicating that the match was inferred rather than parsed from a formal declaration. Review low-confidence edges on the repository's dependency detail page if you need to verify them.
+</Note>
+
+## Artifact detection
+
+For ecosystems where a repository produces a publishable unit, Riftmap also runs artifact detectors alongside the parsers. Detected artifact types include:
+
+- Docker images
+- Helm charts
+- Python packages
+- Go modules
+- Terraform modules
+- Ansible roles and collections
+- npm packages
+
+Artifacts appear as intermediate nodes in the dependency graph, linking the producer repository to every consumer. See [Understanding the dependency graph](/concepts/dependency-graph) for how artifacts fit into the graph model.

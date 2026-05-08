@@ -1,0 +1,104 @@
+---
+title: "Artifacts API — track module and image consumers"
+description: "Look up which repositories consume your Terraform modules, Docker images, Helm charts, npm packages, and other publishable artifacts, and at which versions."
+---
+
+An artifact is a publishable unit that one repository produces and other repositories consume. Riftmap detects artifacts automatically during scanning and tracks them across the dependency graph. Supported artifact types include Terraform modules, Docker images, Helm charts, npm packages, Python packages, Go modules, and Ansible roles and collections. The most common use case is answering the question: "who is consuming my Terraform module, and are they pinned to the latest version?"
+
+## Endpoint overview
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/artifacts/{id}` | Get artifact details |
+| GET | `/artifacts/{id}/consumers` | List all repositories consuming this artifact |
+| GET | `/artifacts/{id}/versions` | List all versions seen across the org |
+| GET | `/connected-orgs/{id}/artifacts` | List all artifacts in a connected org (paginated) |
+
+---
+
+## GET /artifacts/{id}
+
+Returns details for a single artifact including its type, canonical name, source repository, and consumer statistics.
+
+<ResponseField name="id" type="string">
+  Artifact UUID.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Canonical artifact name (e.g. `ghcr.io/my-org/my-image`).
+</ResponseField>
+
+<ResponseField name="artifact_type" type="string">
+  Type of artifact: `terraform_module`, `docker_image`, `helm_chart`, `npm_package`, `python_package`, `go_module`, `ansible_role`, or `ansible_collection`.
+</ResponseField>
+
+<ResponseField name="source_repository_id" type="string">
+  UUID of the repository that produces this artifact.
+</ResponseField>
+
+<ResponseField name="consumer_count" type="number">
+  Distinct repositories consuming this artifact. Only counts edges whose `dependency_type` matches the artifact type — this prevents cross-type leakage when a single repository produces multiple artifacts.
+</ResponseField>
+
+<ResponseField name="is_orphan" type="boolean">
+  `true` when `consumer_count` is `0`. Surfaces artifacts your org publishes but nothing in the org consumes. Use this to identify dead-weight modules and images that can be deprecated or archived.
+</ResponseField>
+
+---
+
+## GET /artifacts/{id}/consumers
+
+Returns every repository in the workspace that consumes this artifact, along with the version they are pinned to. This is the primary endpoint for answering "who is using this, and are they up to date?"
+
+<ResponseField name="total_consumers" type="number">
+  Total consumer count. Matches `consumer_count` on the artifact object.
+</ResponseField>
+
+<ResponseField name="consumers" type="object[]">
+  List of consuming repositories.
+  <Expandable title="properties">
+    <ResponseField name="repository_id" type="string">
+      UUID of the consuming repository.
+    </ResponseField>
+    <ResponseField name="repository_label" type="string">
+      Human-readable name of the consuming repository.
+    </ResponseField>
+    <ResponseField name="version_constraint" type="string">
+      Version pin or constraint string as declared in the consuming repository's source file.
+    </ResponseField>
+    <ResponseField name="dependency_type" type="string">
+      The specific dependency type used (e.g. `terraform_module`, `docker_base_image`).
+    </ResponseField>
+    <ResponseField name="confidence" type="number">
+      Match confidence from `0.0` to `1.0`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+# Find all consumers of an artifact
+curl -H "X-API-Key: rfm_live_..." \
+  https://api.riftmap.dev/api/v1/artifacts/ARTIFACT_ID/consumers
+```
+
+</CodeGroup>
+
+---
+
+## GET /artifacts/{id}/versions
+
+Returns all distinct versions of this artifact that have been observed across the workspace. Use this to understand how many different version pins are in use and to prioritise upgrade campaigns.
+
+---
+
+## GET /connected-orgs/{id}/artifacts
+
+Lists all artifacts known within a connected org. Paginated via `limit` (default `100`, max `500`) and `offset` query parameters. The `X-Total-Count` header contains the total count.
+
+Orphan artifacts (those with `consumer_count: 0`) are included by default. Each row carries `is_orphan` and `consumer_count` so you can filter client-side.
+
+<Note>
+Artifact canonical names are deduplicated: `ghcr.io/my-org/my-image` and `my-org/my-image` collapse to one logical artifact in the stats counters, but the raw `/artifacts` list may include both rows. Use `consumer_count` and `is_orphan` from the stats endpoint to get the aggregated view.
+</Note>

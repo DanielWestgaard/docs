@@ -1,0 +1,262 @@
+---
+title: "Billing API — manage plans, seats, and subscriptions"
+description: "Check your current plan and usage, create Stripe Checkout sessions, manage seats, switch plans, cancel or resume subscriptions, and view billing history."
+---
+
+The billing API lets you manage every aspect of your Riftmap subscription: checking what plan you are on, creating a Stripe Checkout session to subscribe, adding or removing seats, switching between plans, and cancelling or resuming a subscription. All billing endpoints require the `owner` role. If you are running a self-hosted Riftmap instance without a `STRIPE_SECRET_KEY` configured, all billing endpoints are disabled and no limits are enforced.
+
+<Note>
+All billing endpoints require the `owner` role. API keys are Owner-equivalent within their workspace and can call these endpoints.
+</Note>
+
+## Endpoint overview
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/billing/plans` | List available plans and their limits |
+| GET | `/workspaces/{id}/billing` | Current plan, seat counts, and over-limit flags |
+| GET | `/workspaces/{id}/billing/usage` | Detailed resource usage vs. plan limits |
+| POST | `/workspaces/{id}/billing/checkout` | Create a Stripe Checkout session |
+| POST | `/workspaces/{id}/billing/portal` | Create a Stripe Customer Portal session |
+| POST | `/workspaces/{id}/billing/change-plan` | Switch between Team and Business |
+| GET | `/workspaces/{id}/billing/change-plan/preview` | Preview proration before switching plans |
+| POST | `/workspaces/{id}/billing/seats` | Add seat add-ons |
+| DELETE | `/workspaces/{id}/billing/seats` | Remove seat add-ons |
+| GET | `/workspaces/{id}/billing/seats/preview` | Preview proration before changing seat count |
+| POST | `/workspaces/{id}/billing/cancel` | Cancel subscription at period end |
+| POST | `/workspaces/{id}/billing/resume` | Un-cancel a pending cancellation |
+| GET | `/workspaces/{id}/billing/history` | Billing event log (invoices and credit notes) |
+
+---
+
+## Checking your plan and usage
+
+### GET /billing/plans
+
+Returns the plan catalog with pricing and limits, sourced from Stripe (cached for one hour). Accessible to any authenticated user — no role requirement. Falls back to hardcoded defaults if Stripe is unreachable.
+
+### GET /workspaces/{id}/billing
+
+Returns your current billing status:
+
+<ResponseField name="plan" type="string">
+  Current plan name: `free`, `team`, or `business`.
+</ResponseField>
+
+<ResponseField name="seat_count" type="number">
+  Current number of workspace members.
+</ResponseField>
+
+<ResponseField name="seat_limit" type="number">
+  Maximum members allowed on your current plan.
+</ResponseField>
+
+<ResponseField name="cancel_at" type="string">
+  ISO 8601 timestamp if your subscription is pending cancellation; `null` otherwise.
+</ResponseField>
+
+<ResponseField name="over_seat_limit" type="boolean">
+  `true` when member count exceeds the plan's seat limit. New invitations are blocked until members are removed or you upgrade.
+</ResponseField>
+
+<ResponseField name="over_org_limit" type="boolean">
+  `true` when connected org count exceeds the plan's org limit. New org connections are blocked; existing orgs are not removed.
+</ResponseField>
+
+<ResponseField name="over_repo_limit" type="boolean">
+  `true` when total repository count exceeds the plan's repo limit. Future scans process repositories up to the limit and skip the rest.
+</ResponseField>
+
+<ResponseField name="can_manage_subscription" type="boolean">
+  `true` when the authenticated user has the owner role and can make subscription changes.
+</ResponseField>
+
+### GET /workspaces/{id}/billing/usage
+
+Returns detailed resource usage counts versus plan limits, including per-feature flags for scheduled scans, webhook scans, export, audit log, and SSO.
+
+---
+
+## Subscribing
+
+### POST /workspaces/{id}/billing/checkout
+
+Creates a Stripe Checkout session for upgrading a free workspace to a paid plan. Returns a `checkout_url` to redirect the user to.
+
+<ParamField body="plan" type="string" required>
+  `"team"` or `"business"`.
+</ParamField>
+
+```json
+{ "checkout_url": "https://checkout.stripe.com/pay/cs_live_..." }
+```
+
+Returns `409` with a structured body if the workspace already has a live subscription:
+
+```json
+{
+  "type": "subscription_exists",
+  "current_plan": "team",
+  "cancel_at": "2026-05-14T12:00:00+00:00",
+  "suggested_action": "resume_subscription"
+}
+```
+
+`suggested_action` is `"resume_subscription"` when `cancel_at` is set (the subscription is pending cancellation), or `"change_plan"` otherwise. Use this to route the user to the appropriate action instead of opening a duplicate Checkout session.
+
+---
+
+## Managing an active subscription
+
+### POST /workspaces/{id}/billing/portal
+
+Creates a Stripe Customer Portal session where your users can update their payment method, download invoices, and cancel the subscription. Returns `{ "portal_url": "..." }`.
+
+### POST /workspaces/{id}/billing/change-plan
+
+Switches between Team and Business on an existing paid subscription. Swaps the base price in Stripe, clears any pending cancellation (`cancel_at_period_end`), and resets extra seat add-ons to zero.
+
+<ParamField body="plan" type="string" required>
+  `"team"` or `"business"`.
+</ParamField>
+
+<ParamField body="member_ids_to_evict" type="string[]">
+  UUIDs of members to remove if the new plan's seat limit is lower than the current member count. Required when a `409 member_eviction_required` is returned.
+</ParamField>
+
+<ParamField body="promotion_code" type="string">
+  Stripe promotion code ID (`promo_...`) or customer-facing code string. Returns `422 invalid_promotion_code` if the code is unknown or inactive.
+</ParamField>
+
+**409 responses you may receive:**
+
+`member_eviction_required` — the target plan allows fewer seats than your current member count:
+
+```json
+{
+  "type": "member_eviction_required",
+  "overflow": 3,
+  "new_seat_limit": 5,
+  "current_member_count": 8,
+  "evictable_members": [
+    { "user_id": "...", "email": "...", "full_name": "...", "role": "member", "joined_at": "..." }
+  ],
+  "suggested_eviction_ids": ["uuid", "uuid", "uuid"]
+}
+```
+
+Re-submit with `member_ids_to_evict` containing exactly `overflow` non-owner UUIDs to proceed atomically.
+
+`org_disconnect_required` — the target plan allows fewer org connections than you currently have:
+
+```json
+{
+  "type": "org_disconnect_required",
+  "overflow": 2,
+  "new_org_limit": 1,
+  "current_org_count": 3,
+  "excess_orgs": [
+    { "id": "...", "name": "...", "url": "...", "platform": "github" }
+  ]
+}
+```
+
+Disconnect the listed orgs via `DELETE /connected-orgs/{id}`, then retry.
+
+### GET /workspaces/{id}/billing/change-plan/preview
+
+Read-only preview of proration and any warnings for a proposed plan switch. Use this before calling `change-plan` to show the user what they will be charged today and on their next invoice.
+
+Query parameters: `target_plan` (`team` or `business`), optional `promotion_code`.
+
+---
+
+## Seats
+
+### POST /workspaces/{id}/billing/seats
+
+Adds seat add-ons to an active subscription.
+
+<ParamField body="additional_seats" type="number" required>
+  Number of seats to add.
+</ParamField>
+
+Returns `{ "extra_seats": N, "seat_limit": N }`.
+
+### DELETE /workspaces/{id}/billing/seats
+
+Removes seat add-ons. Returns `409 member_eviction_required` if removal would put the workspace over the new seat limit — re-submit with `member_ids_to_evict` to proceed.
+
+<ParamField body="seats_to_remove" type="number" required>
+  Number of seats to remove.
+</ParamField>
+
+<ParamField body="member_ids_to_evict" type="string[]">
+  Member UUIDs to remove when the removal would exceed the new limit.
+</ParamField>
+
+### GET /workspaces/{id}/billing/seats/preview
+
+Preview proration and recurring cost impact of a seat count change before committing. Pass `seat_delta` as a query parameter (positive to add, negative to remove). Returns amounts in cents.
+
+---
+
+## Cancellation and resumption
+
+### POST /workspaces/{id}/billing/cancel
+
+Cancels the subscription at the end of the current billing period (`cancel_at_period_end: true`). Access continues until `cancel_at`.
+
+<ParamField body="reason" type="string">
+  Optional cancellation reason: `"too_expensive"`, `"missing_feature"`, `"switching_competitor"`, `"no_longer_needed"`, or `"other"`.
+</ParamField>
+
+<ParamField body="reason_text" type="string">
+  Optional free-text explanation (max 500 characters).
+</ParamField>
+
+Returns `{ "status": "...", "cancel_at": "..." }`. Returns `422` if already cancelling or the subscription is not in a cancellable state (`active`, `trialing`, or `past_due`).
+
+### POST /workspaces/{id}/billing/resume
+
+Clears `cancel_at_period_end` and un-cancels the subscription. Returns `{ "status": "resumed" }`. Returns `422` if the subscription is not pending cancellation.
+
+---
+
+## Billing history
+
+`GET /workspaces/{id}/billing/history` returns a unified log of invoices and credit notes in descending date order.
+
+<ResponseField name="events" type="object[]">
+  Merged list of invoice and credit note events.
+  <Expandable title="properties">
+    <ResponseField name="id" type="string">Stripe event ID.</ResponseField>
+    <ResponseField name="type" type="string">`"invoice"` or `"credit_note"`.</ResponseField>
+    <ResponseField name="created" type="string">ISO 8601 creation timestamp.</ResponseField>
+    <ResponseField name="amount" type="number">Amount in cents. Credit notes are negative.</ResponseField>
+    <ResponseField name="currency" type="string">Three-letter currency code.</ResponseField>
+    <ResponseField name="status" type="string">Invoice or credit note status.</ResponseField>
+    <ResponseField name="hosted_url" type="string">Stripe-hosted invoice URL.</ResponseField>
+    <ResponseField name="pdf_url" type="string">Direct PDF download URL.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="has_more" type="boolean">
+  `true` when there are more events to fetch. Pass `next_invoice_cursor` and `next_credit_note_cursor` from the current response as query parameters on the next request.
+</ResponseField>
+
+---
+
+## Plan limit enforcement
+
+When you exceed plan limits, certain operations return `402` with an `upgrade_url`:
+
+| Action | Condition |
+|--------|-----------|
+| Connect an org | Org connection limit reached |
+| Accept an invitation | Seat limit reached |
+| Trigger a scan | Repository limit reached |
+
+<Note>
+Self-hosted Riftmap instances (where `STRIPE_SECRET_KEY` is unset) bypass all billing checks. No limits are enforced, and all billing endpoints return errors or are disabled.
+</Note>

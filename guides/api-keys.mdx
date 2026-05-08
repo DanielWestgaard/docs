@@ -1,0 +1,126 @@
+---
+title: "Create, use, and revoke workspace API keys in Riftmap"
+description: "Generate API keys for CI pipelines and scripts, rotate compromised keys, and understand how API key authentication works within your workspace."
+---
+
+API keys give programmatic access to your Riftmap workspace. You use them in CI pipelines, automation scripts, and any integration where a browser session isn't available. Each key is scoped to a single workspace and carries owner-equivalent permissions — it can do anything an owner can do via the API, so treat it like a credential.
+
+Keys follow the format `rfm_live_...` and are shown **once** at creation time. Copy the key immediately and store it in a secrets manager or CI secrets store. Riftmap never displays the raw key again after you leave the creation screen.
+
+## Create an API key
+
+<Tabs>
+  <Tab title="In the app">
+    <Steps>
+      <Step title="Open API Keys settings">
+        Go to **Settings** → **API Keys** in the left sidebar.
+      </Step>
+      <Step title="Create a new key">
+        Click **New API Key**, give it a descriptive name (e.g. `ci-prod-deploy`), and click **Create**.
+      </Step>
+      <Step title="Copy the key">
+        The raw key (`rfm_live_...`) is displayed once. Copy it to your secrets manager now — you cannot retrieve it again.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Via the API">
+    ```bash
+    curl -X POST https://api.riftmap.dev/api/v1/workspaces/{workspace_id}/api-keys \
+      -H "X-API-Key: rfm_live_..." \
+      -H "Content-Type: application/json" \
+      -d '{"name": "ci-prod-deploy"}'
+    ```
+
+    **Response:**
+
+    ```json
+    {
+      "id": "key_a1b2c3d4",
+      "name": "ci-prod-deploy",
+      "key": "rfm_live_abcdefghijklmnopqrstuvwxyz123456",
+      "prefix": "rfm_live_abcd",
+      "created_at": "2026-05-08T10:00:00Z"
+    }
+    ```
+
+    The `key` field is returned only in this response. Store it immediately.
+  </Tab>
+</Tabs>
+
+<Warning>
+  Never commit API keys to version control. Use your CI provider's secrets store (GitHub Actions secrets, GitLab CI/CD variables, etc.) or a dedicated secrets manager like HashiCorp Vault or AWS Secrets Manager.
+</Warning>
+
+## Use the key in API requests
+
+Send the key in the `X-API-Key` header on every request:
+
+```bash
+curl -H "X-API-Key: rfm_live_..." \
+  https://api.riftmap.dev/api/v1/workspaces/{workspace_id}
+```
+
+Alternatively, you can use the `Authorization: Bearer` header — Riftmap accepts `Bearer rfm_live_...` as a convenience alias:
+
+```bash
+curl -H "Authorization: Bearer rfm_live_..." \
+  https://api.riftmap.dev/api/v1/workspaces/{workspace_id}
+```
+
+<Note>
+  API keys bypass role checks and are owner-equivalent within their workspace. A handful of endpoints require an interactive browser session (e.g. `/auth/me`, password change, OAuth flows) and return `403` for API key auth. See the [API authentication reference](/api/authentication) for the full list.
+</Note>
+
+## Example: trigger a scan from CI
+
+A typical CI use case is triggering an incremental scan after a repository push, so your dependency graph stays current:
+
+```bash
+curl -X POST https://api.riftmap.dev/api/v1/connected-orgs/ORG_ID/scans \
+  -H "X-API-Key: rfm_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"scan_type": "incremental"}'
+```
+
+Use `"scan_type": "full"` to re-scan every repository from scratch (slower, but catches deletions and renames that incremental scans may miss).
+
+## List API keys
+
+To see all keys for a workspace (prefix only — the raw key is never returned after creation):
+
+```bash
+curl -H "X-API-Key: rfm_live_..." \
+  https://api.riftmap.dev/api/v1/workspaces/{workspace_id}/api-keys
+```
+
+**Response:**
+
+```json
+[
+  {
+    "id": "key_a1b2c3d4",
+    "name": "ci-prod-deploy",
+    "prefix": "rfm_live_abcd",
+    "created_at": "2026-05-08T10:00:00Z",
+    "last_used_at": "2026-05-08T14:32:11Z"
+  }
+]
+```
+
+The `prefix` field (e.g. `rfm_live_abcd`) lets you identify a key without exposing the full value.
+
+## Revoke an API key
+
+If a key is compromised or no longer needed, revoke it immediately:
+
+```bash
+curl -X DELETE \
+  -H "X-API-Key: rfm_live_..." \
+  https://api.riftmap.dev/api/v1/workspaces/{workspace_id}/api-keys/{key_id}
+```
+
+Revocation is immediate. Any request using the deleted key receives a `401` response.
+
+<Tip>
+  Rotate keys regularly — create a new key, update your secrets store, verify the new key works, then revoke the old one. There's no downtime: both keys are valid during the rotation window.
+</Tip>

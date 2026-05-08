@@ -1,0 +1,147 @@
+---
+title: "Troubleshoot scans, auth, and rate limits in Riftmap"
+description: "Solutions for the most common problems with scans, API authentication, plan limits, rate limits, dependency accuracy, and workspace access in Riftmap."
+---
+
+If something isn't working as expected, the answers below cover the most common issues. If your problem isn't listed here, check the [Riftmap GitHub repository](https://github.com/DanielWestgaard/Riftmap) or reach out via the in-app support chat.
+
+<AccordionGroup>
+  <Accordion title="My scan is stuck in 'running' state">
+    A scan can get stuck when the background worker processing it stopped unexpectedly — for example, if the worker was restarted mid-scan.
+
+    **To recover:**
+
+    1. Cancel the stuck scan:
+       ```bash
+       POST /api/v1/scans/{id}/cancel
+       ```
+    2. Trigger a new scan:
+       ```bash
+       POST /api/v1/connected-orgs/{id}/scans
+       Content-Type: application/json
+
+       { "scan_type": "incremental" }
+       ```
+
+    If scans continue to get stuck, verify that your background workers are running and connected. Scans stuck for more than 3 hours are automatically marked as `failed`.
+
+    <Note>
+      If you are on a self-hosted deployment, verify that the background worker services are running and that the Redis URL is reachable. See [Configure a self-hosted Riftmap deployment](/configuration/environment) for the required environment settings.
+    </Note>
+  </Accordion>
+
+  <Accordion title="Repos are missing from my dependency graph">
+    If repositories are missing from your graph after a scan, the most likely cause is that the Personal Access Token used to connect the org lacks the required scopes.
+
+    **Required token scopes:**
+
+    | Platform | Token type | Required scopes |
+    |---|---|---|
+    | GitHub | Fine-grained PAT (recommended) | Contents: Read-only, Metadata: Read-only |
+    | GitHub | Classic PAT | `repo`, `read:org` |
+    | GitLab | PAT | `read_api`, `read_repository` |
+
+    To rotate the token: go to **Settings → Connected Orgs**, click the org, and update the access token. Then trigger a new full scan to re-process all repositories:
+
+    ```bash
+    POST /api/v1/connected-orgs/{id}/scans
+    Content-Type: application/json
+
+    { "scan_type": "full" }
+    ```
+  </Accordion>
+
+  <Accordion title="I get 401 errors from the API">
+    A `401` means the request was not authenticated. Check the following:
+
+    1. **Header format:** Use `X-API-Key: rfm_live_...` (canonical) or `Authorization: Bearer rfm_live_...`. The key must start with `rfm_live_`.
+    2. **Key revocation:** Verify the key hasn't been revoked. List your active keys:
+       ```bash
+       GET /api/v1/workspaces/{id}/api-keys
+       ```
+    3. **Workspace:** Confirm you are using a key from the correct workspace. Use `GET /api/v1/workspaces` to verify which workspace your key authenticates against.
+
+    The `401` response body always reads:
+    ```json
+    {
+      "detail": "Authentication required. Provide X-API-Key, Authorization: Bearer <key>, or log in."
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="I get 402 errors when connecting an org or triggering a scan">
+    A `402 Payment Required` response means you have hit a plan limit:
+
+    | Action | Limit hit |
+    |---|---|
+    | Connect an org | Org connection limit for your current plan |
+    | Invite a member (on accept) | Seat limit for your current plan |
+    | Trigger a scan | Total repository count exceeds your plan's repo limit |
+
+    To resolve: upgrade your plan in **Settings → Billing → Upgrade Plan**, or add seat add-ons in **Settings → Billing → Seats**. See [Plans, limits, and billing management](/configuration/billing) for details.
+  </Accordion>
+
+  <Accordion title="I get 429 Too Many Requests">
+    A `429` means you have exceeded a rate limit. Check the `Retry-After` header in the response — it tells you how many seconds to wait before retrying.
+
+    Rate limits apply at two levels:
+
+    - **Unauthenticated endpoints** (login, register, password reset): per-IP limits
+    - **Authenticated mutations** (all POST/PUT/PATCH/DELETE): 60 requests per minute per user or API key by default
+
+    If you are hitting the authenticated mutation limit in a CI pipeline, you may need to add delays between API calls or batch operations. If you are running a self-hosted deployment and the defaults are too restrictive, adjust them via the `RATELIMIT_*` environment variables — see [Configure a self-hosted Riftmap deployment](/configuration/environment).
+  </Accordion>
+
+  <Accordion title="Dependencies are missing or wrong in the graph">
+    Riftmap uses ecosystem-specific parsers plus a heuristic scanner to detect dependencies. Most patterns are caught automatically, but very unusual or non-standard dependency declarations may be missed.
+
+    **To refresh the graph with all current data**, run a full scan:
+
+    ```bash
+    POST /api/v1/connected-orgs/{id}/scans
+    Content-Type: application/json
+
+    { "scan_type": "full" }
+    ```
+
+    A full scan re-processes every repository from scratch, rather than only repos that changed since the last scan. If a dependency is still missing after a full scan, check whether the file path and format follow the standard conventions for that ecosystem — see [Supported Ecosystems](/concepts/ecosystems).
+
+    <Note>
+      Unresolved dependencies are stored in the database but do not become graph edges. They appear in `GET /repositories/{id}/dependencies` with `resolved: false`.
+    </Note>
+  </Accordion>
+
+  <Accordion title="OAuth login doesn't work">
+    GitHub OAuth tokens issued after 2026-04-11 no longer carry the `repo` scope — they only include `read:user`, `user:email`, and `read:org`. This means you cannot use OAuth mode to connect an org with a newer GitHub login token.
+
+    **Fix:** Use a Personal Access Token instead when connecting a GitHub org:
+
+    - Fine-grained PAT: grant **Contents: Read-only** and **Metadata: Read-only** at the org level
+    - Classic PAT: grant `repo` and `read:org`
+
+    In the Connect Org modal, the app will show your GitHub orgs as **Prefill** chips above the PAT form. Click a chip to pre-fill the org URL and display name — you only need to paste the PAT.
+
+    GitLab OAuth login is not affected by this change.
+  </Accordion>
+
+  <Accordion title="I can't invite a new member">
+    There are two common reasons an invitation may fail:
+
+    1. **Seat limit reached:** Your plan has no available seats. Check **Settings → Billing** to see your current seat count vs. limit. You can add more seats or upgrade your plan.
+    2. **Unverified email:** Sending invitations requires a verified email address. Check that you have verified your email — a verification link was sent when you registered. You can resend it from **Settings → Profile**.
+
+    <Note>
+      API key auth is exempt from the email verification requirement for invitations. If you need to send invitations programmatically before verifying your email, use an API key.
+    </Note>
+  </Accordion>
+
+  <Accordion title="I get 404 when accessing a resource">
+    Riftmap returns `404` — not `403` — when you try to access a resource that belongs to a different workspace. This is intentional: it avoids leaking whether a resource exists at all.
+
+    If you are seeing unexpected `404` responses, double-check that you are using the API key for the correct workspace. You can verify which workspace a key authenticates against by calling:
+
+    ```bash
+    GET /api/v1/workspaces
+    ```
+  </Accordion>
+</AccordionGroup>

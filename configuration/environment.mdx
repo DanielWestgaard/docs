@@ -1,0 +1,104 @@
+---
+title: "Configure a self-hosted Riftmap instance with env vars"
+description: "Configure a self-hosted Riftmap instance using environment variables — required secrets, optional OAuth, email, billing, and rate limit settings explained."
+---
+
+Riftmap is designed to run self-hosted with minimal configuration. Every setting is controlled via environment variables in your `.env` file. This page covers the settings that affect how Riftmap behaves from a product perspective — what features are enabled, how authentication works, and how to tune rate limits for your team.
+
+## Quick start
+
+```bash
+cp .env.example .env
+# Edit .env — set required values (see below)
+docker compose up
+docker compose exec api alembic upgrade head  # first time only
+```
+
+| Service | URL |
+|---|---|
+| Frontend | http://localhost:5173 |
+| API + Swagger UI | http://localhost:8000/docs |
+
+<Note>
+  The Swagger UI (`/docs`) and ReDoc (`/redoc`) are available in development mode only. Set `APP_ENV=production` to disable them in a public-facing deployment.
+</Note>
+
+## Required settings
+
+These settings must be configured for Riftmap to start correctly.
+
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string. Use the Docker service name `postgres` as the host when running via Docker Compose. |
+| `REDIS_URL` | Redis connection string for the Celery task broker (DB 0). Use `redis` as the host when running via Docker Compose. |
+| `REDIS_STATE_URL` | Redis connection string for rate limiters and OAuth state (DB 1). Same host as `REDIS_URL` — change the trailing `/0` to `/1`. |
+
+## Required in production
+
+These variables are optional in development (sensible defaults or dev-mode fallbacks are used), but are required for a hardened production deployment.
+
+| Variable | How to generate | Notes |
+|---|---|---|
+| `ENCRYPTION_KEY` | `python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'` | Encrypts GitHub and GitLab Personal Access Tokens stored in the database. See warning below. |
+| `JWT_SECRET` | `python -c 'import secrets; print(secrets.token_urlsafe(32))'` | Signs JWT session tokens (access and refresh cookies). |
+| `ITSDANGEROUS_SECRET` | Same as `JWT_SECRET` generation | Signs password-reset and email-verification links. Keep separate from `JWT_SECRET` so you can rotate session tokens independently without invalidating outstanding reset links. |
+| `ADMIN_API_KEY` | `python -c 'import secrets; print(secrets.token_urlsafe(32))'` | Protects `POST /connected-orgs`. When unset, the check is skipped (fine for local development, not for a public-facing instance). |
+
+<Warning>
+  `ENCRYPTION_KEY` is required in production. Without it, GitHub and GitLab access tokens are stored as plaintext in the database. If the database is ever exposed, all connected org credentials would be compromised. Always set this key and back it up separately from your database backup — a backup without the matching key yields only ciphertext.
+</Warning>
+
+## OAuth login (optional)
+
+OAuth login is enabled per-provider. Leave these unset to disable OAuth for that provider — users can still register and log in with email and password.
+
+| Variable | Provider |
+|---|---|
+| `GITHUB_OAUTH_CLIENT_ID` | GitHub |
+| `GITHUB_OAUTH_CLIENT_SECRET` | GitHub |
+| `GITLAB_OAUTH_CLIENT_ID` | GitLab |
+| `GITLAB_OAUTH_CLIENT_SECRET` | GitLab |
+
+<Note>
+  OAuth login is separate from org scanning credentials. Even with OAuth disabled, users can connect GitHub and GitLab orgs by providing a Personal Access Token directly.
+</Note>
+
+## Email (optional)
+
+Email is used for account verification, password reset, and workspace invitations. If `RESEND_API_KEY` is not set, all emails fall back to stdout logging — useful during development, not suitable for production.
+
+| Variable | Description |
+|---|---|
+| `RESEND_API_KEY` | Resend API key. Get one at [resend.com](https://resend.com). |
+| `EMAIL_FROM` | The sender address and name shown in emails (e.g. `Riftmap <noreply@example.com>`). |
+
+## Billing (optional)
+
+Billing features are enabled when `STRIPE_SECRET_KEY` is set. When it is not set, billing is disabled entirely — no plan limits are enforced and billing API endpoints return `503`. This is the intended behavior for self-hosted deployments that don't need metered usage.
+
+When `STRIPE_SECRET_KEY` is set, all five variables below are required:
+
+| Variable | Description |
+|---|---|
+| `STRIPE_SECRET_KEY` | Stripe secret key (`sk_live_...` or `sk_test_...`). |
+| `STRIPE_PUBLISHABLE_KEY` | Stripe publishable key (`pk_live_...` or `pk_test_...`). |
+| `STRIPE_WEBHOOK_SECRET` | Webhook signing secret (`whsec_...`). Used to verify that webhook events come from Stripe. |
+| `STRIPE_PRICE_TEAM` | Stripe Price ID for the Team plan monthly price. |
+| `STRIPE_PRICE_BUSINESS` | Stripe Price ID for the Business plan monthly price. |
+
+## Rate limit tuning (optional)
+
+All rate limits are configurable without a redeploy. The defaults are conservative and suitable for a public SaaS launch; loosen them if you are running a private internal deployment.
+
+| Variable | Default | What it limits |
+|---|---|---|
+| `RATELIMIT_LOGIN` | `5 per 15 minutes` | Login attempts per IP |
+| `RATELIMIT_REGISTER` | `5 per hour` | Registration attempts per IP |
+| `RATELIMIT_PWRESET_REQUEST` | `3 per hour` | Password reset requests per IP |
+| `RATELIMIT_PWRESET_CONFIRM` | `10 per hour` | Password reset confirmations per IP |
+| `RATELIMIT_INVITE_ACCEPT` | `10 per hour` | Invitation accepts (endpoint-scoped, not per URL) |
+| `RATELIMIT_EMAIL_VERIFY_RESEND` | `3 per hour` | Email verification resend requests |
+| `RATELIMIT_LOGIN_PER_EMAIL` | `10` | Failed login attempts per email address before a 15-minute lockout |
+| `RATELIMIT_AUTHENTICATED_MUTATIONS` | `60 per minute` | All authenticated write operations (POST/PUT/PATCH/DELETE) per user or API key |
+
+Use the limits format: `"N per M unit"` — for example, `"20 per 15 minutes"`.

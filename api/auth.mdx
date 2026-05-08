@@ -1,0 +1,228 @@
+---
+title: "Auth API endpoints — register, login, and profile"
+description: "Riftmap auth endpoints cover registration, login, profile management, password reset, email verification, OAuth flows, and Terms of Service acceptance."
+---
+
+The auth endpoints cover the full identity lifecycle: creating an account, signing in, managing your profile, handling email verification, resetting your password, and accepting updated Terms of Service. Most endpoints are open to all auth methods, but a subset requires a live session cookie and returns `403` if you call them with an API key.
+
+## Endpoint overview
+
+| Method | Path | Auth required | Description |
+|--------|------|---------------|-------------|
+| GET | `/auth/providers` | None | List enabled OAuth providers |
+| POST | `/auth/register` | None | Create account, personal workspace, and default API key |
+| POST | `/auth/login` | None | Email/password login; sets session cookies |
+| POST | `/auth/logout` | Session or API key | Clear cookies and revoke the current session |
+| POST | `/auth/refresh` | Session cookie | Rotate the refresh token and re-issue the access token |
+| GET | `/auth/me` | Session only | Current user, workspaces, role, and linked providers |
+| PATCH | `/auth/me` | Session only | Update `full_name`, `email`, or `onboarding_completed` |
+| POST | `/auth/password/reset/request` | None | Send a password reset email |
+| POST | `/auth/password/reset/confirm` | None | Confirm reset with token and new password |
+| POST | `/auth/password/change` | Session only | Change password for accounts that already have one |
+| POST | `/auth/password/set` | Session only | Set a password on an OAuth-only account |
+| GET | `/auth/oauth/{provider}/start` | None | Begin OAuth flow (`github` or `gitlab`) |
+| GET | `/auth/oauth/{provider}/callback` | None | Handle OAuth callback and set session cookies |
+| POST | `/auth/email/verify` | None | Verify email with a signed token |
+| POST | `/auth/email/verify/resend` | Session only | Resend verification email to the logged-in user |
+| POST | `/auth/accept-tos` | Session only | Accept the current Terms of Service version |
+| POST | `/auth/account/delete` | Session only | Schedule account deletion (30-day grace period) |
+| POST | `/auth/account/cancel-deletion` | Session only | Cancel a pending account deletion |
+
+<Note>
+Session-only endpoints return `403` when called with an `X-API-Key`. These are: `GET /auth/me`, `PATCH /auth/me`, `POST /auth/password/change`, `POST /auth/password/set`, `POST /auth/email/verify/resend`, `POST /auth/account/delete`, and `POST /auth/accept-tos`.
+</Note>
+
+---
+
+## POST /auth/register
+
+Creates a new user account together with a personal workspace and a default API key. On success the response sets httponly session cookies and returns a `MeResponse` object.
+
+### Request body
+
+<ParamField body="email" type="string" required>
+  Your email address. Used for login and verification.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Minimum 12 characters; must not be a common password.
+</ParamField>
+
+<ParamField body="full_name" type="string">
+  Your display name. Optional.
+</ParamField>
+
+<ParamField body="workspace_name" type="string">
+  Name for your personal workspace. Defaults to a generated name if omitted.
+</ParamField>
+
+<ParamField body="tos_accepted" type="boolean" required>
+  Must be `true`. Returns `422` if `false` or missing.
+</ParamField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://api.riftmap.dev/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "you@company.com",
+    "password": "supersecretpassword123",
+    "full_name": "Alex Smith",
+    "workspace_name": "Acme Workspace",
+    "tos_accepted": true
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## POST /auth/login
+
+Authenticates with email and password, sets httponly session cookies (access token valid for 15 minutes, refresh token valid for 30 days), and returns a `MeResponse`.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://api.riftmap.dev/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "you@company.com",
+    "password": "supersecretpassword123"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## MeResponse shape
+
+`/auth/register`, `/auth/login`, `/auth/me`, and `/auth/refresh` all return a `MeResponse` object.
+
+<ResponseField name="id" type="string" required>
+  Your user UUID.
+</ResponseField>
+
+<ResponseField name="email" type="string" required>
+  Your email address.
+</ResponseField>
+
+<ResponseField name="full_name" type="string">
+  Your display name.
+</ResponseField>
+
+<ResponseField name="avatar_url" type="string">
+  Profile picture URL, populated from OAuth providers.
+</ResponseField>
+
+<ResponseField name="last_login_at" type="string">
+  ISO 8601 timestamp of the most recent login.
+</ResponseField>
+
+<ResponseField name="workspaces" type="object[]">
+  List of workspaces you belong to.
+</ResponseField>
+
+<ResponseField name="current_workspace_id" type="string">
+  UUID of your currently active workspace.
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  Your role in the current workspace: `owner`, `admin`, `member`, or `null`.
+</ResponseField>
+
+<ResponseField name="linked_providers" type="string[]">
+  OAuth providers you have linked (e.g. `["github"]`). Used by the frontend to decide whether to show the OAuth org picker.
+</ResponseField>
+
+<ResponseField name="email_verified" type="boolean">
+  Whether your email address has been verified.
+</ResponseField>
+
+<ResponseField name="onboarding_completed" type="boolean">
+  `true` once you have completed or skipped the post-registration wizard. Setting this to `true` via `PATCH /auth/me` requires a verified email — the API returns `403` otherwise.
+</ResponseField>
+
+<ResponseField name="has_password" type="boolean">
+  `false` for OAuth-only accounts that have not yet set a password.
+</ResponseField>
+
+<ResponseField name="deletion_scheduled_at" type="string">
+  ISO 8601 timestamp if account deletion is pending; `null` otherwise.
+</ResponseField>
+
+<ResponseField name="tos_accepted_at" type="string">
+  When you last accepted the Terms of Service. `null` for accounts created before enforcement began.
+</ResponseField>
+
+<ResponseField name="tos_version" type="string">
+  The ToS version you accepted (e.g. `"2026-04-12"`). `null` for pre-enforcement accounts.
+</ResponseField>
+
+<ResponseField name="current_tos_version" type="string">
+  The version currently in effect on the server.
+</ResponseField>
+
+<ResponseField name="tos_enforcement_date" type="string">
+  ISO date after which stale accounts are blocked from logging in until they accept the latest ToS.
+</ResponseField>
+
+---
+
+## Terms of Service versioning
+
+When `tos_version` differs from `current_tos_version`, you accepted an older version of the Terms of Service. The app behaviour depends on how far past the enforcement date you are:
+
+- **Before `tos_enforcement_date`:** The application shows a non-dismissable orange banner. You can continue using Riftmap but will be prompted to accept the updated terms.
+- **After `tos_enforcement_date`:** Login succeeds, but every page redirects to `/accept-terms` until you call `POST /auth/accept-tos`.
+
+### POST /auth/accept-tos
+
+Session auth only. No request body. Updates `tos_accepted_at` and `tos_version` to the current server values.
+
+```json
+{ "tos_version": "2026-04-12", "tos_accepted_at": "2026-04-26T09:00:00Z" }
+```
+
+---
+
+## Account deletion
+
+`POST /auth/account/delete` schedules deletion with a 30-day GDPR grace period. The endpoint validates your password (if you have one set) and checks that you are not the sole owner of a shared workspace — if you are, transfer ownership first.
+
+On success it returns `202`:
+
+```json
+{
+  "detail": "Account deletion scheduled.",
+  "deletion_scheduled_at": "2026-06-07T12:00:00Z"
+}
+```
+
+All your sessions are immediately revoked. During the 30-day window, you can cancel by calling `POST /auth/account/cancel-deletion` — a valid session JWT (obtained by logging back in) is sufficient proof of identity.
+
+<Warning>
+`POST /auth/account/delete` returns `409` if you are the sole owner of a workspace that has other members. Transfer ownership with `POST /workspaces/{id}/transfer` before requesting deletion.
+</Warning>
+
+---
+
+## Rate limits
+
+The following auth endpoints are rate-limited per IP:
+
+| Endpoint | Default limit |
+|----------|--------------|
+| `POST /auth/login` | 5 per 15 minutes |
+| `POST /auth/register` | 5 per hour |
+| `POST /auth/password/reset/request` | 3 per hour |
+| `POST /auth/password/reset/confirm` | 10 per hour |
+| `POST /auth/email/verify/resend` | 3 per hour |
+
+When a limit is exceeded the API returns `429` with a `Retry-After` header:
+
+```json
+{ "detail": "Too many requests. Try again in 47 seconds.", "retry_after": 47 }
+```

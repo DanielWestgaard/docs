@@ -1,0 +1,86 @@
+---
+title: "Understanding the Riftmap dependency graph and edges"
+description: "The dependency graph maps every cross-repo relationship Riftmap detects. Nodes are repositories, edges are dependencies, direction shows who depends on whom."
+---
+
+The dependency graph is the central artifact Riftmap builds from scanning your org. It represents every relationship between repositories that Riftmap could detect: one repository referencing another's Terraform module, base Docker image, Helm chart, Python package, CI pipeline, and so on. The graph is scoped to your workspace's connected orgs — it only includes repositories Riftmap has scanned.
+
+## Nodes: repositories
+
+Each node in the graph represents one repository in a connected org. The node label is the repository's name as it appears in GitHub or GitLab. Nodes carry a small amount of metadata — whether the repository is archived, when it was last active, and its health status based on the most recent scan.
+
+## Edges: dependencies
+
+An edge connects two repositories and represents a dependency relationship. Edges are directed: they point **from the consumer to the producer**. If repository A depends on repository B, the edge points from A to B.
+
+```
+repo-A  ──depends on──▶  repo-B
+```
+
+This means: repo-A consumes something that repo-B produces.
+
+Each edge also carries:
+
+| Field | What it means |
+|---|---|
+| `dependency_type` | Which ecosystem the dependency comes from (for example, `terraform_module` or `docker_base_image`) |
+| `version_constraint` | The version or ref the consumer pins, if specified (for example, `v1.2.0` or `main`) |
+| `confidence` | How certain Riftmap is that this edge is correct (see below) |
+
+When two repositories depend on each other through multiple ecosystems — for example, one Terraform module dependency and one Docker base image dependency — the graph shows a single visual edge between them with a count of how many distinct dependency types underlie it.
+
+## Understanding impact direction
+
+Because edges point from consumer to producer, impact flows in the **reverse** direction of the arrows. If you change repo-B, every repository that has an edge pointing **to** repo-B is potentially affected.
+
+```
+repo-A  ──▶  repo-B  ◀──  repo-C
+```
+
+In the example above, changing repo-B could impact both repo-A and repo-C. Riftmap's Impact Mode visualizes this blast radius — starting from a repository you select, it highlights every downstream consumer transitively.
+
+<Tip>
+Use Impact Mode in the graph UI, or call `GET /api/v1/repositories/{id}/impact`, to see the full downstream blast radius of a repository before you make a change.
+</Tip>
+
+## Artifacts: intermediate nodes
+
+Some repositories produce publishable artifacts — Docker images, Helm charts, Terraform modules, Python packages, Go modules, Ansible roles and collections, npm packages. Riftmap models these as intermediate nodes that link the producer repository to every consumer repository.
+
+For example, if `infra/base-image` builds and publishes a Docker image, and three other repositories reference that image in their Dockerfiles, the graph contains:
+
+```
+infra/base-image  ──produces──▶  [Docker image: ghcr.io/org/base-image]  ◀──  app-A
+                                                                          ◀──  app-B
+                                                                          ◀──  app-C
+```
+
+Artifacts make it easy to answer questions like "who is consuming version X of my Helm chart?" — use `GET /api/v1/artifacts/{id}/consumers` to see every consumer and the version they have pinned.
+
+## Confidence scores
+
+Every edge carries a `confidence` value between 0.0 and 1.0 that reflects how certain Riftmap is about the match.
+
+| Confidence | What it means |
+|---|---|
+| `1.0` | Exact match — the reference was resolved to a known repository or artifact with certainty (for example, a git URL that directly names a repo in your org, or an artifact name that matches exactly) |
+| `< 1.0` | Heuristic match — the reference was resolved using naming conventions or pattern matching rather than an explicit URL. The edge is likely correct but worth verifying if accuracy is critical. |
+
+Unresolved declarations — references that Riftmap could not match to any known repository or artifact in your org — are stored but do not appear as edges in the graph. They are visible on the individual repository's dependency list as unresolved entries.
+
+## Reading the graph in the UI
+
+<AccordionGroup>
+  <Accordion title="Focus Mode">
+    Click any repository node to enter Focus Mode. The graph zooms in to show only that repository, its direct dependencies (what it consumes), and its direct dependents (who consumes it). This is the fastest way to understand a single repository's place in the org.
+  </Accordion>
+  <Accordion title="Impact Mode">
+    From Focus Mode, click **Impact** to switch to Impact Mode. The graph highlights the full downstream blast radius — every repository that transitively depends on the selected one. Use this before making a breaking change.
+  </Accordion>
+  <Accordion title="Filtering by ecosystem">
+    The edge type filter in the top toolbar lets you show only edges of specific dependency types, for example hiding all `npm_package` edges to focus on infrastructure dependencies.
+  </Accordion>
+  <Accordion title="Searching">
+    Use the keyboard-driven search (press `/`) to jump to any repository by name. The graph re-centers on the result.
+  </Accordion>
+</AccordionGroup>

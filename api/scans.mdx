@@ -1,0 +1,163 @@
+---
+title: "Scans and repositories API — trigger scans, check status"
+description: "Trigger and poll scans, cancel running scans, and query per-repository dependencies, dependents, and full downstream blast-radius impact via the API."
+---
+
+Riftmap builds its dependency graph by scanning every repository in a connected org. You can trigger scans on demand via the API — useful for CI pipelines that want fresh graph data before running impact analysis — then poll the scan status until it reaches a terminal state. Repository endpoints let you drill into individual repos to see what they depend on, what depends on them, and the full downstream blast radius.
+
+## Scan endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/connected-orgs/{id}/scans` | Trigger a new scan |
+| GET | `/connected-orgs/{id}/scans` | Scan history (paginated) |
+| GET | `/scans/{id}` | Scan status and progress |
+| POST | `/scans/{id}/cancel` | Cancel a running scan |
+
+## Repository endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/repositories/{id}` | Repository details |
+| GET | `/repositories/{id}/dependencies` | Direct dependencies of this repository |
+| GET | `/repositories/{id}/dependents` | Repositories that depend on this one |
+| GET | `/repositories/{id}/impact` | Full downstream blast radius via BFS |
+
+---
+
+## Triggering a scan
+
+`POST /connected-orgs/{id}/scans` starts a scan for the specified org. You can choose between a full scan (re-processes every repository) or an incremental scan (only processes repositories that have changed since the last scan).
+
+### Request body
+
+<ParamField body="scan_type" type="string" default="incremental">
+  `"full"` or `"incremental"`. Use `"incremental"` for routine runs; use `"full"` after changing heuristic patterns or when you suspect drift.
+</ParamField>
+
+Returns `403` if your email is unverified (API key auth is exempt). Returns `402` with an `upgrade_url` if your plan's repository limit would be exceeded.
+
+---
+
+## Polling for completion
+
+Trigger a scan, record the returned scan ID, then poll `GET /scans/{id}` until the status reaches a terminal state.
+
+**Scan statuses:**
+
+| Status | Description |
+|--------|-------------|
+| `pending` | Queued, waiting for a worker |
+| `running` | Actively scanning repositories |
+| `completed` | Finished successfully |
+| `failed` | Encountered an unrecoverable error |
+| `cancelled` | Cancelled via `POST /scans/{id}/cancel` |
+
+<CodeGroup>
+
+```bash trigger and poll
+# Trigger a scan
+curl -X POST https://api.riftmap.dev/api/v1/connected-orgs/ORG_ID/scans \
+  -H "X-API-Key: rfm_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"scan_type": "incremental"}'
+
+# Poll status (repeat until status is completed/failed/cancelled)
+curl -H "X-API-Key: rfm_live_..." \
+  https://api.riftmap.dev/api/v1/scans/SCAN_ID
+```
+
+</CodeGroup>
+
+<Tip>
+Poll with an exponential back-off starting at around 5 seconds. Most incremental scans on small orgs complete in under a minute; full scans on large orgs may take several minutes.
+</Tip>
+
+---
+
+## Cancelling a scan
+
+`POST /scans/{id}/cancel` requests cancellation of a `running` scan. The cancellation signal is checked before processing each repository. Repository results that have already been processed are preserved — a cancelled scan gives you partial data, not no data.
+
+---
+
+## Repository dependencies
+
+`GET /repositories/{id}/dependencies` returns the direct dependencies of a repository.
+
+Results are deduplicated at read-time: identical declarations that resolve to the same target collapse to the highest-confidence row. Unresolved declarations are included with `resolved: false` and null target fields.
+
+<ResponseField name="source_file" type="string">
+  Path to the file where the dependency was declared.
+</ResponseField>
+
+<ResponseField name="source_line" type="number">
+  Line number of the declaration.
+</ResponseField>
+
+<ResponseField name="dependency_type" type="string">
+  Dependency ecosystem type (e.g. `terraform_module`, `python_package`). See the [graph endpoint docs](/api/graph) for the full list.
+</ResponseField>
+
+<ResponseField name="raw_reference" type="string">
+  The raw string as it appears in the source file.
+</ResponseField>
+
+<ResponseField name="version_constraint" type="string">
+  Version pin or constraint string, if present.
+</ResponseField>
+
+<ResponseField name="resolved" type="boolean">
+  `true` when Riftmap matched this declaration to a known repository or artifact.
+</ResponseField>
+
+<ResponseField name="confidence" type="number">
+  Match confidence from `0.0` to `1.0`. `1.0` means an exact match; lower values indicate a heuristic match.
+</ResponseField>
+
+---
+
+## Repository dependents
+
+`GET /repositories/{id}/dependents` returns the repositories in the same workspace that declare a dependency on this repository. Use this to understand who will be affected before you make a breaking change.
+
+---
+
+## Blast-radius impact
+
+`GET /repositories/{id}/impact` runs a breadth-first search (BFS) outward from the repository, following dependency edges downstream. The result is every repository in the graph that would potentially be affected by a change to this one.
+
+### Query parameters
+
+<ParamField query="max_depth" type="number" default="10">
+  Maximum BFS depth. Increase for large, deeply nested graphs; decrease for faster responses on exploratory queries.
+</ParamField>
+
+The response lists impacted repositories with their BFS depth from the source and the path of edges that connects them.
+
+<ResponseField name="impacted_repos" type="object[]">
+  List of repositories reachable downstream.
+  <Expandable title="properties">
+    <ResponseField name="id" type="string">
+      Repository UUID.
+    </ResponseField>
+    <ResponseField name="label" type="string">
+      Human-readable repository name (e.g. `infra/vpc`).
+    </ResponseField>
+    <ResponseField name="depth" type="number">
+      BFS depth from the source repository. Direct dependents have `depth: 1`.
+    </ResponseField>
+    <ResponseField name="path" type="string[]">
+      Ordered list of repository UUIDs from the source to this repo.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -H "X-API-Key: rfm_live_..." \
+  "https://api.riftmap.dev/api/v1/repositories/REPO_ID/impact?max_depth=5"
+```
+
+</CodeGroup>

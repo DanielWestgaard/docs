@@ -1,0 +1,113 @@
+{
+  "projectType": "saas",
+  "projectName": "Riftmap",
+  "projectDescription": "Riftmap scans your GitHub or GitLab organization, automatically discovers cross-repo dependencies across every ecosystem, and gives you a queryable dependency graph with impact analysis — so you can answer 'If I change repo X, what else breaks?' before you merge.",
+  "theme": "luma",
+  "primaryColor": "#0c64c4",
+  "lightColor": "#84b4dc",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "connect-org"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/workspaces",
+              "concepts/scanning",
+              "concepts/dependency-graph",
+              "concepts/ecosystems"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/impact-analysis",
+              "guides/artifact-consumers",
+              "guides/graph-ui",
+              "guides/api-keys",
+              "guides/team-management"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/authentication",
+              "configuration/billing",
+              "configuration/environment"
+            ]
+          },
+          {
+            "group": "Help",
+            "pages": [
+              "troubleshooting",
+              "faq"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication",
+              "api/rate-limits",
+              "api/pagination"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/auth",
+              "api/workspaces",
+              "api/connected-orgs",
+              "api/scans",
+              "api/graph",
+              "api/artifacts",
+              "api/billing"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Zero-config org scanning — connect once with a read-only token, no per-repo YAML required",
+    "Cross-ecosystem dependency detection (Terraform, Docker, Python, CI/CD, Helm, Go, npm, Ansible, Kustomize, Kubernetes)",
+    "Interactive dependency graph with Focus Mode, Impact Mode, clustering, and semantic zoom",
+    "Impact analysis — BFS-powered blast radius query: 'If I change repo X, what else breaks?'",
+    "Consumer-side artifact visibility — see every repo consuming a Terraform module, Docker image, or Helm chart and at which version",
+    "Incremental scanning via last_activity_at to keep the graph fresh",
+    "Multi-user workspaces with role-based access (owner / admin / member) and workspace API keys for CI",
+    "Stripe-powered billing with free tier and paid plans"
+  ],
+  "publicApiSurface": [
+    "POST /api/v1/auth/register",
+    "POST /api/v1/auth/login",
+    "GET /api/v1/auth/me",
+    "POST /api/v1/connected-orgs",
+    "POST /api/v1/connected-orgs/{id}/scans",
+    "GET /api/v1/connected-orgs/{id}/graph",
+    "GET /api/v1/repositories/{id}/impact",
+    "GET /api/v1/repositories/{id}/dependencies",
+    "GET /api/v1/repositories/{id}/dependents",
+    "GET /api/v1/artifacts/{id}/consumers",
+    "GET /api/v1/artifacts/{id}/versions",
+    "GET /api/v1/workspaces/{id}/api-keys",
+    "POST /api/v1/workspaces/{id}/api-keys",
+    "GET /api/v1/workspaces/{id}/billing",
+    "GET /api/v1/workspaces/{id}/export"
+  ]
+}

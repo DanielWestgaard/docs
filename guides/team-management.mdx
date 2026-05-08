@@ -1,0 +1,131 @@
+---
+title: "Invite members, assign roles, and manage workspace access"
+description: "Invite teammates by email or shareable link, assign roles, change or remove members, and transfer workspace ownership when you need to step down."
+---
+
+Every Riftmap workspace has a set of members, each with a role that controls what they can do. You can invite people directly by email or generate a shareable link for onboarding multiple teammates at once. Roles, seat limits, and ownership transfers are all managed from **Settings → Members** or via the API.
+
+## Roles
+
+| Role | What they can do |
+|---|---|
+| **Owner** | Full access including billing, workspace deletion, and transferring ownership. There must always be at least one owner. |
+| **Admin** | Connect and manage orgs, invite members, run scans. Cannot access billing or delete the workspace. |
+| **Member** | Read-only access to the graph, repositories, artifacts, and scan history. |
+
+<Note>
+  API keys bypass role checks and behave as owner-equivalent. If you use API keys for automation, treat them with the same care as owner credentials.
+</Note>
+
+## Invite a member
+
+Riftmap supports two invitation types:
+
+- **Email invitation** — single-use, expires after 7 days. Best for inviting a specific person.
+- **Link invitation** — configurable number of uses, expires after 30 days. Best for onboarding a team.
+
+<Tabs>
+  <Tab title="In the app">
+    <Steps>
+      <Step title="Open Members settings">
+        Go to **Settings** → **Members**, then click **Invite**.
+      </Step>
+      <Step title="Choose invitation type">
+        Enter an email address for a direct invitation, or leave it blank to generate a shareable link. Set the role for the invitee.
+      </Step>
+      <Step title="Send or share">
+        Click **Send invitation**. For email invitations, Riftmap sends the link directly. For link invitations, copy the URL and share it with your team.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Via the API — email">
+    ```bash
+    curl -X POST https://api.riftmap.dev/api/v1/workspaces/{workspace_id}/invitations \
+      -H "X-API-Key: rfm_live_..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "email": "alex@company.com",
+        "role": "member"
+      }'
+    ```
+  </Tab>
+  <Tab title="Via the API — link">
+    ```bash
+    curl -X POST https://api.riftmap.dev/api/v1/workspaces/{workspace_id}/invitations \
+      -H "X-API-Key: rfm_live_..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "role": "admin",
+        "max_uses": 10
+      }'
+    ```
+
+    The response includes an `invite_url` you can share. The link accepts up to `max_uses` acceptances before it expires.
+  </Tab>
+</Tabs>
+
+<Note>
+  Invitations are subject to your plan's seat limit. If your workspace is at the seat limit, new members cannot accept invitations until you remove existing members or upgrade your plan.
+</Note>
+
+## Accept an invitation
+
+When someone receives an invitation link:
+
+1. They visit the URL — `GET /api/v1/invitations/{token}` — which shows a preview of the workspace name and inviting user without requiring them to be logged in.
+2. They create or log in to their Riftmap account.
+3. The invitation is accepted via `POST /api/v1/invitations/{token}/accept`.
+
+This happens automatically in the Riftmap web app when someone follows the invite URL.
+
+## Change a member's role
+
+```bash
+curl -X PATCH \
+  https://api.riftmap.dev/api/v1/workspaces/{workspace_id}/members/{user_id} \
+  -H "X-API-Key: rfm_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+```
+
+Valid roles are `"owner"`, `"admin"`, and `"member"`. You need owner or admin access to change roles.
+
+## Remove a member
+
+```bash
+curl -X DELETE \
+  https://api.riftmap.dev/api/v1/workspaces/{workspace_id}/members/{user_id} \
+  -H "X-API-Key: rfm_live_..."
+```
+
+The removed member loses access immediately. Their scan history and contributions to the dependency graph are preserved.
+
+## Transfer workspace ownership
+
+Use the transfer endpoint to atomically promote a member to owner and step yourself down to admin. This is the safest way to hand off a workspace:
+
+```bash
+curl -X POST \
+  https://api.riftmap.dev/api/v1/workspaces/{workspace_id}/transfer \
+  -H "X-API-Key: rfm_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "target-member-user-id"}'
+```
+
+The operation is atomic — the promotion and demotion happen in a single transaction. The current owner becomes an admin; the target member becomes the owner.
+
+<Warning>
+  You cannot demote or remove the last owner of a workspace. If you're the only owner and want to leave, use the transfer endpoint first to promote another member to owner.
+</Warning>
+
+## Revoke a pending invitation
+
+To cancel an invitation that hasn't been accepted yet:
+
+```bash
+curl -X DELETE \
+  https://api.riftmap.dev/api/v1/workspaces/{workspace_id}/invitations/{invitation_id} \
+  -H "X-API-Key: rfm_live_..."
+```
+
+The invitation link becomes invalid immediately.

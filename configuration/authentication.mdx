@@ -1,0 +1,100 @@
+---
+title: "Authentication methods: API keys, sessions, and admin key"
+description: "Learn how to authenticate API requests using session cookies, workspace API keys, or the admin key — and which method to use for your use case."
+---
+
+Every request to the Riftmap API must be authenticated. Riftmap supports three authentication methods: session cookies (set automatically when you log in via the web app), workspace API keys (the right choice for scripts, CI pipelines, and API integrations), and an admin key for server-side provisioning. Most API consumers should use a workspace API key.
+
+## Authentication methods
+
+<Tabs>
+  <Tab title="Workspace API key (recommended)">
+    A workspace API key (`rfm_live_...`) is the standard way to authenticate programmatic access. You can pass it as an `X-API-Key` header (canonical) or as an `Authorization: Bearer` token — both work identically.
+
+    **Generate a key:** Go to **Settings → API Keys** in the app, or call `POST /workspaces/{id}/api-keys`. The raw key is shown once at creation time; store it securely.
+
+    ```bash
+    # Using X-API-Key header (canonical)
+    curl -H "X-API-Key: rfm_live_..." https://api.riftmap.dev/api/v1/workspaces
+
+    # Using Authorization: Bearer
+    curl -H "Authorization: Bearer rfm_live_..." https://api.riftmap.dev/api/v1/workspaces
+    ```
+
+    <Note>
+      API keys are Owner-equivalent within their workspace — they bypass role checks. Use them in CI pipelines and automation where you need full API access without a user session.
+    </Note>
+  </Tab>
+  <Tab title="Session cookies (browser)">
+    When you log in via the web app (`POST /auth/login` or OAuth), Riftmap sets httponly session cookies automatically. Your browser sends these on every request — no extra configuration needed. The access token expires after 15 minutes and is refreshed automatically using the 30-day refresh token.
+
+    Session auth respects workspace roles (`owner > admin > member`). Some sensitive actions (such as changing your password or viewing OAuth-linked orgs) are only available via session auth; they return `403` for API key requests.
+
+    **Session-only endpoints:**
+
+    | Endpoint | Description |
+    |---|---|
+    | `GET /auth/me` | Current user and workspace details |
+    | `PATCH /auth/me` | Update your profile |
+    | `POST /auth/password/change` | Change your password |
+    | `GET /workspaces/{id}/oauth-orgs/{provider}` | List OAuth-accessible orgs |
+
+    <Note>
+      If you are calling these endpoints from a script or tool, you need an active browser session or must authenticate via email and password using `POST /auth/login` first.
+    </Note>
+  </Tab>
+  <Tab title="Admin key">
+    The admin key is a server-side-only credential used to protect `POST /connected-orgs` during self-hosted provisioning. It is set via the `ADMIN_API_KEY` environment variable on your server.
+
+    <Warning>
+      Never expose the admin key in the browser or in any `VITE_*` build-time variable. Use it only from `curl` or a provisioning script running on the server. When `ADMIN_API_KEY` is unset (development mode), the check is skipped.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Request priority order
+
+When a request includes multiple credentials, Riftmap resolves them in this order and uses the first match:
+
+1. `X-API-Key` header
+2. `Authorization: Bearer rfm_*` (only when the value starts with `rfm_`)
+3. Session cookie
+4. `401` — no valid credential found
+
+The `Authorization: Bearer` alias exists so CI tools that only support standard headers work without modification. The `rfm_` prefix check prevents collision with user JWTs.
+
+## Error responses
+
+| Status | Meaning |
+|---|---|
+| `401` | No valid credential was provided, or the API key has been revoked |
+| `403` | Your credential is valid but the endpoint requires session auth (browser login) |
+| `404` | You are authenticated, but the resource belongs to a different workspace |
+
+A `401` response always includes:
+
+```json
+{
+  "detail": "Authentication required. Provide X-API-Key, Authorization: Bearer <key>, or log in."
+}
+```
+
+<Note>
+  Riftmap returns `404` — not `403` — when you try to access another workspace's resources. This is intentional: it avoids leaking whether the resource exists at all.
+</Note>
+
+## Managing API keys
+
+You can create, list, and revoke API keys at any time:
+
+<Steps>
+  <Step title="Create a key">
+    In the app: go to **Settings → API Keys → Create key**. Via API: `POST /workspaces/{id}/api-keys`. The full key is only shown once — copy it before closing.
+  </Step>
+  <Step title="List keys">
+    `GET /workspaces/{id}/api-keys` returns all keys for your workspace. Only key prefixes and hashes are returned — the raw key is never shown again after creation.
+  </Step>
+  <Step title="Revoke a key">
+    In the app: click **Revoke** next to the key. Via API: `DELETE /workspaces/{id}/api-keys/{key_id}`. Revoked keys stop working immediately.
+  </Step>
+</Steps>

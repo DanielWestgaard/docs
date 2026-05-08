@@ -1,0 +1,51 @@
+---
+title: "Riftmap: cross-repo dependency mapping for modern orgs"
+description: "Riftmap scans your GitHub org or GitLab group, maps every cross-repo dependency across all major ecosystems, and answers: if I change X, what breaks?"
+---
+
+Riftmap connects to your GitHub organization or GitLab group and builds a live, queryable dependency graph across every repository — automatically. When you're about to refactor a shared Terraform module, update a base Docker image, or cut a new version of an internal Python package, Riftmap tells you exactly which downstream repositories will be affected before you ship.
+
+## The core problem Riftmap solves
+
+In a multi-repo organization, answering "if I change repo X, what else breaks?" usually means searching through wikis, asking teammates, or discovering breakage after the fact in CI. The more repos you have, the worse it gets.
+
+Riftmap solves this by scanning every repository in your org and resolving how each one depends on every other — across ecosystems, across teams, across hundreds of repos — without asking you to maintain a single configuration file.
+
+## Key features
+
+**Zero per-repo configuration.** Connect once at the org level with a read-only token. Riftmap discovers dependencies from the actual code: `go.mod` files, `requirements.txt`, Dockerfiles, `Chart.yaml`, GitHub Actions workflows, and more.
+
+**Cross-ecosystem dependency graph.** A single scan maps Terraform module references, Docker base images, Python packages, CI/CD pipeline includes, Helm chart dependencies, Go modules, npm packages, Kustomize resources, Kubernetes manifests, and Ansible roles — all in one graph.
+
+**Impact analysis.** Select any repository and run an impact query to see the full downstream blast radius: which repos depend on it, how many hops away, and via what dependency type.
+
+**Interactive graph UI.** Browse your entire org's dependency graph in the browser. Focus Mode narrows the view to a single repository's neighborhood. Impact Mode highlights the downstream blast radius of a change. Semantic zoom, keyboard-driven search, and dependency-type filtering make large graphs navigable.
+
+**REST API.** Query impact programmatically from CI pipelines, internal tooling, or scripts. All graph data is available via a versioned JSON API authenticated with a workspace API key.
+
+## Supported ecosystems
+
+Riftmap parses dependencies from the following ecosystems in a single scan:
+
+Terraform · Docker / docker-compose · Python (requirements.txt, pyproject.toml, setup.cfg) · GitHub Actions · GitLab CI · Ansible (roles + collections) · Helm (Chart.yaml, values.yaml) · Go modules · npm · Kustomize · Kubernetes manifests · ArgoCD
+
+<Note>
+  See [Supported Ecosystems](/concepts/ecosystems) for the full list of parsed file types and dependency kinds.
+</Note>
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Create an account and run your first scan in under 5 minutes.
+  </Card>
+  <Card title="Connect an org" icon="plug" href="/connect-org">
+    Link your GitHub org or GitLab group using a PAT or OAuth.
+  </Card>
+  <Card title="Dependency graph" icon="diagram-project" href="/concepts/dependency-graph">
+    Learn how Riftmap builds and queries the graph.
+  </Card>
+  <Card title="API reference" icon="code" href="/api/overview">
+    Integrate impact analysis into your CI pipelines.
+  </Card>
+</CardGroup>

@@ -1,0 +1,75 @@
+---
+title: "Paginate Riftmap API list responses with limit and offset"
+description: "Use the limit and offset query parameters to paginate large list responses and read X-Total-Count to compute page counts without extra requests."
+---
+
+List endpoints that can return large result sets support offset-based pagination. You control the page size and starting position using two query parameters, and every paginated response includes an `X-Total-Count` header with the total row count so you can calculate how many pages exist.
+
+## Query parameters
+
+<ParamField query="limit" type="integer" default="100">
+  Maximum number of items to return in this response. Must be between 1 and 500.
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip before returning results. Zero-based.
+</ParamField>
+
+## Response header
+
+<ResponseField name="X-Total-Count" type="integer">
+  The total number of matching rows in the dataset, regardless of the current `limit` and `offset`. Use this to compute total pages: `Math.ceil(total / limit)`.
+</ResponseField>
+
+`X-Total-Count` is included in `Access-Control-Expose-Headers`, so browser `fetch()` calls can read it directly.
+
+## Paginated endpoints
+
+The following endpoints support `limit` and `offset`:
+
+| Method | Path |
+|---|---|
+| GET | `/workspaces` |
+| GET | `/workspaces/{id}/members` |
+| GET | `/connected-orgs/{id}/repositories` |
+| GET | `/connected-orgs/{id}/scans` |
+| GET | `/connected-orgs/{id}/artifacts` |
+
+Other list endpoints — such as connected orgs, API keys, and invitations — are naturally bounded by workspace size and do not require pagination.
+
+## Example: paginating through repositories
+
+<CodeGroup>
+
+```bash Page 1 (first 50 repos)
+curl -H "X-API-Key: rfm_live_..." \
+  "https://api.riftmap.dev/api/v1/connected-orgs/ORG_ID/repositories?limit=50&offset=0"
+```
+
+```bash Page 2 (next 50 repos)
+curl -H "X-API-Key: rfm_live_..." \
+  "https://api.riftmap.dev/api/v1/connected-orgs/ORG_ID/repositories?limit=50&offset=50"
+```
+
+</CodeGroup>
+
+The response for both requests includes an `X-Total-Count` header. If `X-Total-Count` is `137` and your `limit` is `50`, you need three pages:
+
+```
+Page 1: offset=0    (items 1–50)
+Page 2: offset=50   (items 51–100)
+Page 3: offset=100  (items 101–137)
+```
+
+Total pages: `Math.ceil(137 / 50)` = `3`
+
+## Validation errors
+
+The API returns `422 Unprocessable Entity` if you provide invalid pagination parameters:
+
+- `limit` greater than `500`
+- `offset` less than `0`
+
+<Warning>
+  Using `limit=0` is not supported. Set `limit` to at least `1` to receive results.
+</Warning>

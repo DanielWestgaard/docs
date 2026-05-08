@@ -1,0 +1,141 @@
+---
+title: "Dependency graph API — nodes, edges, and dependency types"
+description: "GET /connected-orgs/{id}/graph returns every repository node and dependency edge for your org — ready to render, filter, or feed into custom tooling."
+---
+
+The graph endpoint returns the complete dependency graph for a connected org in a format designed to be immediately renderable or processable. Every repository in the org becomes a node, and every resolved dependency between repositories becomes a directed edge. You can use this data to build your own tooling on top of Riftmap — custom Slack alerts, automated PR checks, compliance reports, or anything else that benefits from knowing the full dependency topology.
+
+## Endpoint
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/connected-orgs/{id}/graph` | Full dependency graph (nodes and edges) |
+
+---
+
+## GET /connected-orgs/{id}/graph
+
+Returns an object with `nodes` and `edges` arrays representing the full dependency graph for the org at the time of the last completed scan.
+
+### Response format
+
+```json
+{
+  "nodes": [
+    {
+      "id": "uuid",
+      "type": "repository",
+      "label": "infra/vpc",
+      "metadata": {
+        "archived": false,
+        "last_activity_at": "2026-04-10T08:30:00Z",
+        "health_status": "healthy"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "uuid",
+      "source": "uuid",
+      "target": "uuid",
+      "dependency_type": "terraform_module",
+      "version_constraint": "v1.2.0",
+      "confidence": 1.0
+    }
+  ]
+}
+```
+
+### Node fields
+
+<ResponseField name="id" type="string">
+  Repository UUID. Use this to join with other endpoints (e.g. `/repositories/{id}/impact`).
+</ResponseField>
+
+<ResponseField name="type" type="string">
+  Always `"repository"` for repository nodes.
+</ResponseField>
+
+<ResponseField name="label" type="string">
+  Human-readable repository name as it appears in the platform (e.g. `infra/vpc`).
+</ResponseField>
+
+<ResponseField name="metadata" type="object">
+  <Expandable title="properties">
+    <ResponseField name="archived" type="boolean">
+      Whether the repository is archived on the platform.
+    </ResponseField>
+    <ResponseField name="last_activity_at" type="string">
+      ISO 8601 timestamp of the most recent commit or push.
+    </ResponseField>
+    <ResponseField name="health_status" type="string">
+      Summary health indicator for the repository.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Edge fields
+
+<ResponseField name="id" type="string">
+  Edge UUID.
+</ResponseField>
+
+<ResponseField name="source" type="string">
+  UUID of the repository that declares the dependency (the consumer).
+</ResponseField>
+
+<ResponseField name="target" type="string">
+  UUID of the repository being depended on (the producer).
+</ResponseField>
+
+<ResponseField name="dependency_type" type="string">
+  Ecosystem type of the dependency. See the full list below.
+</ResponseField>
+
+<ResponseField name="version_constraint" type="string">
+  Version pin or constraint string as declared in the source file, if present.
+</ResponseField>
+
+<ResponseField name="confidence" type="number">
+  Match confidence from `0.0` to `1.0`. `1.0` means Riftmap resolved the reference to an exact repository match. Values below `1.0` indicate a heuristic match — treat the edge as probable rather than certain.
+</ResponseField>
+
+---
+
+## Edge deduplication
+
+Edges are deduplicated server-side by `(source, target, dependency_type)`. If repository A depends on repository B via two separate Terraform module references of the same type, those collapse to a single edge in the graph response. The highest-confidence match is kept.
+
+<Note>
+The `(source, target, dependency_type)` deduplication key also governs the `total_dependencies` counter in `GET /connected-orgs/{id}/stats` and `GET /workspaces/{id}/stats`. This means the number you see in the stats UI matches the edge count in this response.
+</Note>
+
+---
+
+## Dependency types
+
+The `dependency_type` field uses stable string identifiers. Use these values when filtering or grouping edges in your own tooling.
+
+| Type | Source |
+|------|--------|
+| `terraform_module` | Terraform `module` blocks |
+| `docker_base_image` | Dockerfile `FROM`, Compose `image:`, Kubernetes containers, Kustomize images |
+| `python_package` | `requirements.txt`, `pyproject.toml`, `setup.cfg`, `setup.py` |
+| `gitlab_ci_include` | GitLab CI `include:` and `trigger:` directives |
+| `gitlab_ci_image` | `image:` in GitLab CI pipelines |
+| `github_actions_action` | `uses: org/repo@ref` (composite and JavaScript actions) in GitHub Actions workflows |
+| `github_actions_reusable_workflow` | `uses: org/repo/.github/workflows/*.yml@ref` (reusable workflows) |
+| `ansible_role` | `requirements.yml`, `galaxy.yml` — roles |
+| `ansible_collection` | `requirements.yml`, `galaxy.yml` — collections |
+| `helm_chart_dependency` | `Chart.yaml` `dependencies` block |
+| `helm_chart_reference` | `helm upgrade/install` in CI scripts or Terraform `helm_release` |
+| `go_module` | `go.mod` `require` and `replace` directives |
+| `npm_package` | `package.json` dependencies |
+| `kustomize_resource` | `kustomization.yaml` resources and images |
+| `kubernetes_image` | Plain Kubernetes manifests |
+| `argocd_app_source` | ArgoCD `Application` `spec.source.repoURL` and `ApplicationSet` generators |
+| `aggregated` | Frontend-only: cluster-to-cluster edge roll-up (not returned by the API) |
+
+<Tip>
+Use this endpoint as the foundation for custom automation. Fetch the graph, filter edges by `dependency_type`, and post a Slack message listing every repository affected by an upcoming change — no Riftmap UI required.
+</Tip>

@@ -1,0 +1,167 @@
+---
+title: "Connect a GitHub org or GitLab group using a PAT or OAuth"
+description: "Link your GitHub organization or GitLab group to Riftmap using a Personal Access Token or OAuth, then trigger your first scan to build the dependency graph."
+---
+
+Riftmap scans repositories by connecting to your GitHub organization or GitLab group. You have two options: **PAT mode**, where you supply a read-only Personal Access Token, and **OAuth mode**, where Riftmap uses the identity you linked when signing up. PAT mode is recommended for most setups — it works with both the UI and the API, and the token's permissions are explicit and auditable.
+
+## PAT mode (recommended)
+
+### GitHub
+
+Create a Personal Access Token in your GitHub account settings with read-only access to the organization's repositories.
+
+**Fine-grained PAT (recommended):**
+
+1. Go to **GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens**.
+2. Click **Generate new token**.
+3. Under **Repository access**, select **All repositories** (or a specific set of repos in the org).
+4. Under **Permissions**, grant:
+   - **Contents**: Read-only
+   - **Metadata**: Read-only
+5. Click **Generate token** and copy the value.
+
+**Classic PAT (fallback):**
+
+1. Go to **GitHub Settings → Developer settings → Personal access tokens → Tokens (classic)**.
+2. Click **Generate new token**.
+3. Select the following scopes:
+   - `repo` (full repo access — read-only is not available for classic PATs)
+   - `read:org`
+4. Click **Generate token** and copy the value.
+
+<Warning>
+  Store your token securely. Riftmap encrypts it at rest, but you should treat it like a password — don't paste it into chat tools, commit it to a repo, or share it outside your team.
+</Warning>
+
+Once you have a token, connect the org via the API:
+
+<CodeGroup>
+  ```bash cURL
+  curl -X POST https://api.riftmap.dev/api/v1/connected-orgs \
+    -H "X-API-Key: rfm_live_..." \
+    -H "Content-Type: application/json" \
+    -d '{
+      "platform": "github",
+      "url": "https://github.com/my-org",
+      "access_token": "ghp_...",
+      "name": "My Org"
+    }'
+  ```
+</CodeGroup>
+
+Request body:
+
+```json
+{
+  "platform": "github",
+  "url": "https://github.com/my-org",
+  "access_token": "ghp_...",
+  "name": "My Org"
+}
+```
+
+### GitLab
+
+Create a Personal Access Token with read-only API and repository access.
+
+1. Go to **GitLab → User Settings → Access Tokens** (or use a Group Access Token under your group's **Settings → Access Tokens**).
+2. Click **Add new token**.
+3. Select the following scopes:
+   - `read_api`
+   - `read_repository`
+4. Click **Create personal access token** and copy the value.
+
+<Warning>
+  Don't expose your token in client-side code, public repositories, or environment variables that get printed to logs.
+</Warning>
+
+Connect the group via the API:
+
+<CodeGroup>
+  ```bash cURL
+  curl -X POST https://api.riftmap.dev/api/v1/connected-orgs \
+    -H "X-API-Key: rfm_live_..." \
+    -H "Content-Type: application/json" \
+    -d '{
+      "platform": "gitlab",
+      "url": "https://gitlab.com/my-group",
+      "access_token": "glpat-...",
+      "name": "My Group"
+    }'
+  ```
+</CodeGroup>
+
+Request body:
+
+```json
+{
+  "platform": "gitlab",
+  "url": "https://gitlab.com/my-group",
+  "access_token": "glpat-...",
+  "name": "My Group"
+}
+```
+
+Both requests return a `201 Created` response with the connected org object, including the `id` you'll use to trigger scans.
+
+## OAuth mode
+
+OAuth mode connects an org using the GitHub or GitLab identity you linked to your Riftmap account when you signed up. It's the fastest path in the UI but is available only in browser sessions — you can't use OAuth mode with an API key.
+
+To connect via OAuth:
+
+1. In the Riftmap UI, click **Connect org**.
+2. Select **GitHub** or **GitLab** and click **Connect with OAuth**.
+3. Riftmap fetches the list of organizations or groups accessible via your linked identity.
+4. Pick the org or group from the picker and click **Connect**.
+
+<Note>
+  **GitHub OAuth scope requirement.** GitHub OAuth tokens issued after April 2026 carry only `read:user`, `user:email`, and `read:org` — they don't include repository access. If Riftmap shows a warning that your token doesn't have the necessary scopes, use PAT mode instead and grant the `repo` + `read:org` scopes (classic PAT) or `Contents: Read-only` + `Metadata: Read-only` (fine-grained PAT).
+
+  GitLab OAuth tokens always include `read_api` and `read_repository`, so OAuth mode works without any extra steps for GitLab groups.
+</Note>
+
+## Rotating a token
+
+To update the PAT on an existing connected org — for example, after your token expires or you need to rotate credentials — use `PUT /connected-orgs/{id}`:
+
+```bash
+curl -X PUT https://api.riftmap.dev/api/v1/connected-orgs/{id} \
+  -H "X-API-Key: rfm_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"access_token": "ghp_new_token_here"}'
+```
+
+<Note>
+  Orgs connected via OAuth cannot have their token rotated via this endpoint. To switch an OAuth-connected org to PAT mode, delete it and re-register it using the PAT request body above.
+</Note>
+
+## Trigger a scan
+
+After connecting an org, trigger a scan to build the dependency graph:
+
+```bash
+curl -X POST https://api.riftmap.dev/api/v1/connected-orgs/{id}/scans \
+  -H "X-API-Key: rfm_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"scan_type": "full"}'
+```
+
+Use `"scan_type": "incremental"` (the default) for subsequent scans — Riftmap skips repositories whose code hasn't changed since the last scan, making incremental scans significantly faster.
+
+You can poll the scan status at `GET /api/v1/scans/{scan_id}` or watch it update in real time on the Riftmap dashboard.
+
+## Authentication headers
+
+All API requests require either your workspace API key or a session token. The `X-API-Key` header is the canonical form; `Authorization: Bearer` is also accepted when the value starts with `rfm_`:
+
+```bash
+# X-API-Key (canonical)
+-H "X-API-Key: rfm_live_..."
+
+# Authorization: Bearer (convenience alias)
+-H "Authorization: Bearer rfm_live_..."
+```
+
+Find your workspace API key under **Settings → API keys** in the Riftmap UI, or create one via `POST /api/v1/workspaces/{id}/api-keys`. See [API keys](/guides/api-keys) for details.

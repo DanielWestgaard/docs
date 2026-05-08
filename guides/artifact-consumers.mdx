@@ -1,0 +1,158 @@
+---
+title: "Find who consumes your Terraform modules and Docker images"
+description: "Use Riftmap's consumer visibility to see every repository using your artifact, which version they're pinned to, and which artifacts have no consumers at all."
+---
+
+When you publish a Terraform module, Docker image, Helm chart, or any other reusable artifact, Riftmap tracks not just what you produce — but who consumes it and at which version. This consumer-side visibility is one of Riftmap's core differentiators: instead of asking "what does repo X depend on?", you can ask "who depends on *me*, and are they up to date?"
+
+## What are artifacts?
+
+Artifacts are publishable units that repositories produce and other repositories consume. Riftmap detects them automatically during scanning — no manual registration required. Supported artifact types include:
+
+- Terraform modules
+- Docker images (Dockerfiles, Compose files, Kubernetes manifests)
+- Helm charts
+- npm packages
+- Python packages (PyPI-published)
+- Ansible roles and collections
+- Go modules
+
+Each artifact carries a `consumer_count` (distinct repositories consuming it) and an `is_orphan` flag (true when nothing in the org consumes it).
+
+## List all artifacts in your org
+
+```bash
+curl -H "X-API-Key: rfm_live_..." \
+  "https://api.riftmap.dev/api/v1/connected-orgs/{org_id}/artifacts"
+```
+
+**Response excerpt:**
+
+```json
+{
+  "items": [
+    {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "infra/terraform-vpc-module",
+      "artifact_type": "terraform_module",
+      "source_repository_id": "b2c3d4e5-...",
+      "consumer_count": 7,
+      "is_orphan": false
+    },
+    {
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "name": "ghcr.io/acme/base-python",
+      "artifact_type": "docker_image",
+      "source_repository_id": "d4e5f6a7-...",
+      "consumer_count": 0,
+      "is_orphan": true
+    }
+  ]
+}
+```
+
+<Note>
+  The `is_orphan` flag identifies artifacts your org publishes but nothing in the org consumes. These are candidates for cleanup — check whether the artifact is consumed by repos outside your org before deleting it.
+</Note>
+
+## Find all consumers of an artifact
+
+To see every repository consuming a specific artifact and which version they're pinned to:
+
+```bash
+curl -H "X-API-Key: rfm_live_..." \
+  "https://api.riftmap.dev/api/v1/artifacts/{artifact_id}/consumers"
+```
+
+**Response:**
+
+```json
+{
+  "artifact": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "infra/terraform-vpc-module",
+    "artifact_type": "terraform_module",
+    "consumer_count": 3
+  },
+  "consumers": [
+    {
+      "repository_id": "e5f6a7b8-...",
+      "repository_name": "services/payments",
+      "version_constraint": "v1.4.2"
+    },
+    {
+      "repository_id": "f6a7b8c9-...",
+      "repository_name": "services/auth",
+      "version_constraint": "v1.3.0"
+    },
+    {
+      "repository_id": "a7b8c9d0-...",
+      "repository_name": "infra/staging",
+      "version_constraint": "v2.0.1"
+    }
+  ],
+  "total_consumers": 3
+}
+```
+
+## See all versions seen across the org
+
+To check which versions of an artifact are in active use across your organization:
+
+```bash
+curl -H "X-API-Key: rfm_live_..." \
+  "https://api.riftmap.dev/api/v1/artifacts/{artifact_id}/versions"
+```
+
+This endpoint returns every distinct version constraint Riftmap has observed across all consuming repositories in the org.
+
+## Walk-through: preparing a breaking release
+
+Say you're about to release **v2.1.0** of your Terraform VPC module, which contains breaking changes. You want to know which repositories are still on `v1.x` and will be affected.
+
+<Steps>
+  <Step title="Find your artifact ID">
+    List artifacts for your org and filter by name:
+
+    ```bash
+    curl -s \
+      -H "X-API-Key: rfm_live_..." \
+      "https://api.riftmap.dev/api/v1/connected-orgs/{org_id}/artifacts" \
+      | jq '.items[] | select(.name | contains("vpc-module"))'
+    ```
+  </Step>
+  <Step title="Fetch all consumers">
+    Use the artifact ID from the previous step:
+
+    ```bash
+    curl -s \
+      -H "X-API-Key: rfm_live_..." \
+      "https://api.riftmap.dev/api/v1/artifacts/{artifact_id}/consumers" \
+      | jq '.consumers[] | select(.version_constraint | startswith("v1."))'
+    ```
+
+    This filters to only the repositories pinned to a `v1.x` version.
+  </Step>
+  <Step title="Plan your migration">
+    The filtered output gives you the exact list of teams to notify and repositories to update before or after you publish `v2.1.0`. You can use the repository IDs to query each repo's impact radius if you also want to understand second-order effects.
+  </Step>
+</Steps>
+
+<Tip>
+  Run this check as part of your release process — before tagging a breaking version — to catch drift between what you ship and what downstream teams actually consume.
+</Tip>
+
+## Identifying dead-weight artifacts
+
+Artifacts with `is_orphan: true` are published by your org but consumed by nothing in it. To list only orphan artifacts:
+
+```bash
+curl -s \
+  -H "X-API-Key: rfm_live_..." \
+  "https://api.riftmap.dev/api/v1/connected-orgs/{org_id}/artifacts" \
+  | jq '.items[] | select(.is_orphan == true) | {name, artifact_type}'
+```
+
+<Warning>
+  An orphan artifact may still be consumed by repositories outside your connected org (e.g. a separate GitLab group or by external customers). Verify externally before archiving or removing the producing repository.
+</Warning>

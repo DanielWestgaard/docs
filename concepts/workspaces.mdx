@@ -1,0 +1,90 @@
+---
+title: "Workspaces: billing, members, and access control in Riftmap"
+description: "A workspace is the billing and access boundary in Riftmap. Every connected org, scan result, API key, and team member belongs to exactly one workspace."
+---
+
+A workspace is the top-level container in Riftmap. It holds your connected GitHub orgs and GitLab groups, the dependency graph built from scanning them, your team members, and your billing plan. When you register, Riftmap automatically creates a personal workspace for you. You can belong to multiple workspaces — for example, your own free workspace and a shared team workspace your company owns.
+
+## What a workspace contains
+
+| Resource | Notes |
+|---|---|
+| Connected orgs | The GitHub orgs or GitLab groups you have linked for scanning |
+| Repositories & graph | All repos discovered by scanning your connected orgs, and the edges between them |
+| Members | The people who have access to the workspace and their roles |
+| API keys | Programmatic credentials scoped to this workspace |
+| Billing plan | The subscription tier and its limits |
+
+Everything in Riftmap is scoped to a workspace. Attempting to access another workspace's resources returns a 404 — Riftmap intentionally does not reveal whether a resource exists in a workspace you don't belong to.
+
+## Roles
+
+Three roles control what members can do inside a workspace.
+
+| Role | What they can do |
+|---|---|
+| **Owner** | Full control: manage billing, delete the workspace, change member roles, invite members, manage API keys, connect and disconnect orgs, view the graph and scan results |
+| **Admin** | Manage org connections, invite members, view the graph and scan results. Cannot access billing or delete the workspace. |
+| **Member** | Read-only access to the dependency graph and scan results |
+
+A workspace must always have at least one owner. To step down as the sole owner, first transfer ownership to another member via **Settings → Members → Transfer ownership**.
+
+<Note>
+API keys are owner-equivalent within their workspace. A request authenticated with a workspace API key can perform any action an owner can, including triggering scans and managing connected orgs. Treat your API keys with the same care as owner credentials.
+</Note>
+
+## Plans and limits
+
+| Plan | Repositories | Seats | Connected orgs |
+|---|---|---|---|
+| **Free** | 15 | 1 | 1 |
+| **Team** | 100 | 5 + add-ons | 1 |
+| **Business** | 500 | 15 + add-ons | Unlimited |
+
+The free plan lets you connect one GitHub org or GitLab group, scan up to 15 repositories, and have one seat (yourself). Upgrade to a paid plan to add more repositories, invite your team, or connect multiple orgs.
+
+<Tip>
+You can only own one free workspace. If you need a second workspace — for example, to separate a personal project from a company account — the second workspace must be on a paid plan.
+</Tip>
+
+## Inviting members
+
+<Steps>
+  <Step title="Open member settings">
+    Go to **Settings → Members** inside the workspace.
+  </Step>
+  <Step title="Send an invitation">
+    Enter a teammate's email address to send a single-use invite, or generate a shareable link with a configurable use limit. Email invitations expire after 7 days; link invitations expire after 30 days.
+  </Step>
+  <Step title="They accept">
+    Your teammate follows the link, creates an account (or logs in), and is added to the workspace as a Member. You can change their role afterwards.
+  </Step>
+</Steps>
+
+<Warning>
+Accepting an invitation counts against your plan's seat limit. If your workspace is at its seat limit, invitation accepts are blocked until you remove a member or upgrade your plan.
+</Warning>
+
+## Creating API keys
+
+API keys let CI pipelines, scripts, and integrations authenticate to Riftmap without a user session.
+
+<Steps>
+  <Step title="Open API key settings">
+    Go to **Settings → API Keys** inside the workspace.
+  </Step>
+  <Step title="Create a key">
+    Click **New API key** and give it a descriptive name (for example, `ci-pipeline` or `terraform-checker`).
+  </Step>
+  <Step title="Copy the key">
+    The raw key is shown exactly once. Copy it to your secret manager now — Riftmap only stores a hash and cannot show it again.
+  </Step>
+</Steps>
+
+To use an API key, pass it in the `X-API-Key` request header, or as `Authorization: Bearer rfm_live_...` for tools that only support the standard `Authorization` header.
+
+You can create multiple keys (for example, one per CI environment) and revoke them individually without affecting the others.
+
+## Switching between workspaces
+
+If you belong to more than one workspace, you can switch the active workspace from the account menu in the top-right corner of the Riftmap UI. The workspace you last had active is remembered across sessions.

@@ -1,0 +1,102 @@
+---
+title: "Navigate the Riftmap graph: Focus Mode, Impact Mode, search"
+description: "Learn how to use Focus Mode, Impact Mode, semantic zoom, layout toggles, filters, and graph search to explore your org's dependency graph."
+---
+
+The Riftmap graph page renders your entire organization's dependency relationships as an interactive canvas. Every repository is a node; every dependency is a directed edge color-coded by ecosystem. You can zoom in to inspect individual repositories, zoom out to see cluster-level structure, and use Focus Mode and Impact Mode to answer targeted questions without getting lost in the full graph.
+
+## Semantic zoom
+
+The graph adapts to your zoom level automatically:
+
+- **Zoomed out:** repositories are clustered into groups (by namespace or team prefix). You see the high-level topology — how clusters relate to each other — without individual node clutter.
+- **Zoomed in:** clusters expand to reveal individual repository nodes, edge labels, and version constraints.
+
+Scroll or pinch to zoom. The canvas re-renders smoothly between both views.
+
+## Graph search
+
+Press `/` or click the search bar to find any repository by name. As you type, matching nodes are highlighted and the canvas pans to center the best match. The search is keyboard-driven — press `Enter` to confirm, `Escape` to dismiss.
+
+## Focus Mode
+
+Focus Mode narrows the canvas to a single repository and its direct neighbors, making it easy to understand one repo's immediate relationships without visual noise from the rest of the graph.
+
+<Steps>
+  <Step title="Click a repository node">
+    Click any node on the canvas to select it. A detail panel opens on the right showing repository metadata.
+  </Step>
+  <Step title="Enter Focus Mode">
+    Click **Focus** in the detail panel, or right-click the node and choose **Focus on this repo**. The canvas transitions to show only the selected repo, its direct dependencies (outgoing edges), and its direct dependents (incoming edges).
+  </Step>
+  <Step title="Explore the neighborhood">
+    In Focus Mode, the layout organizes neighbors into columns — dependencies on the left, the focused repo in the center, dependents on the right. Click any neighbor to pivot focus to that repo.
+  </Step>
+  <Step title="Exit Focus Mode">
+    Press **Escape** or click **Exit Focus** in the toolbar to return to the full graph.
+  </Step>
+</Steps>
+
+## Impact Mode
+
+Impact Mode shows the full downstream blast radius from a selected repository — every repo that could break if you change it, highlighted by how many hops away it sits.
+
+<Steps>
+  <Step title="Select a repository">
+    Click the node you're planning to change.
+  </Step>
+  <Step title="Activate Impact Mode">
+    Click **Impact Mode** in the toolbar. Riftmap runs a BFS traversal from the selected repo and highlights all downstream nodes.
+  </Step>
+  <Step title="Read the depth coloring">
+    Direct dependents (depth 1) are highlighted most prominently. Repos at depth 2, 3, and beyond appear progressively dimmer. Repos with no downstream path from your selection are grayed out.
+  </Step>
+  <Step title="Exit Impact Mode">
+    Press **Escape** or click **Exit Impact Mode**.
+  </Step>
+</Steps>
+
+<Tip>
+  Combine both modes: enter Focus Mode first to confirm a repo's direct neighborhood, then activate Impact Mode to trace the full blast radius. This two-step approach works well for dense graphs where the direct picture differs significantly from the transitive one.
+</Tip>
+
+## Layout toggle
+
+Two layout algorithms are available from the toolbar:
+
+| Layout | Best for |
+|---|---|
+| **Dagre (hierarchical)** | Seeing the overall dependency flow top-to-bottom. Default for most graphs. |
+| **Force-directed** | Exploring organically connected clusters; highlights tightly coupled subsystems. |
+
+Click the layout icon in the toolbar to switch. The canvas re-renders while preserving your current zoom and pan position.
+
+## Filters
+
+The filter panel (toolbar → **Filters**) lets you reduce visual noise by hiding specific categories of repositories:
+
+- **Hide stale repos** — repositories with no recent activity
+- **Hide archived repos** — repos marked archived on GitHub or GitLab
+- **Hide isolated repos** — repositories with no dependencies and no dependents
+
+Filters apply immediately and persist across page reloads within your session.
+
+## Edge color coding
+
+Each dependency type has a distinct edge color so you can distinguish ecosystem relationships at a glance:
+
+| Color | Dependency type |
+|---|---|
+| Orange | Terraform modules |
+| Blue | Docker base images |
+| Purple | Python packages |
+| Green | GitHub Actions / GitLab CI |
+| Teal | Helm charts |
+| Yellow | Go modules |
+| Pink | npm packages |
+
+Hover over any edge to see the full dependency type, version constraint, source file, and confidence score.
+
+<Note>
+  The graph is read-only in the UI. To update the data — add a new repository, reflect a dependency change, or remove a deleted repo — trigger a new scan from the **Scans** page or via the API. The graph refreshes automatically when a scan completes.
+</Note>

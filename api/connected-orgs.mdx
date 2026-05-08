@@ -1,0 +1,161 @@
+---
+title: "Connected orgs API — register and manage org connections"
+description: "Register GitHub orgs and GitLab groups for scanning, rotate access tokens, inspect dependency stats, and manage connected org settings via the Riftmap API."
+---
+
+A connected org is a GitHub organisation or GitLab group registered inside your Riftmap workspace. Once connected, Riftmap scans every repository in the org and builds a cross-repository dependency graph. You can connect multiple orgs to one workspace, and two workspaces can independently connect the same org — each workspace maintains its own scan data.
+
+## Endpoint overview
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/connected-orgs` | Register a new connected org |
+| GET | `/connected-orgs` | List all connected orgs in the workspace |
+| GET | `/connected-orgs/{id}` | Get connected org details |
+| PUT | `/connected-orgs/{id}` | Update name, access token, or heuristic patterns |
+| DELETE | `/connected-orgs/{id}` | Delete org and all associated data |
+| GET | `/connected-orgs/{id}/stats` | Repo count, dependency breakdown, last scan summary |
+| GET | `/connected-orgs/{id}/repositories` | List repositories (paginated) |
+| GET | `/connected-orgs/{id}/artifacts` | List known artifacts (paginated) |
+| GET | `/connected-orgs/{id}/graph` | Full dependency graph |
+| POST | `/connected-orgs/{id}/scans` | Trigger a new scan |
+| GET | `/connected-orgs/{id}/scans` | Scan history (paginated) |
+
+---
+
+## POST /connected-orgs — register a connected org
+
+You can connect an org using a Personal Access Token (PAT) or via an OAuth identity linked to your account. Both modes share the same endpoint but take different request bodies.
+
+### PAT mode (recommended)
+
+Use PAT mode when connecting from a CI pipeline or script, or for any GitHub org where your OAuth token does not carry repo scopes.
+
+<ParamField body="platform" type="string" required>
+  `"github"` or `"gitlab"`.
+</ParamField>
+
+<ParamField body="url" type="string" required>
+  Full URL of the org or group, e.g. `https://github.com/my-org`.
+</ParamField>
+
+<ParamField body="access_token" type="string" required>
+  Your PAT. See required scopes below.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Display name for the connection inside Riftmap.
+</ParamField>
+
+**Required GitHub PAT scopes:**
+
+| PAT type | Required scopes |
+|----------|----------------|
+| Fine-grained (recommended) | `Contents: Read-only` + `Metadata: Read-only` |
+| Classic | `repo` + `read:org` |
+
+**Required GitLab PAT scopes:** `read_api` + `read_repository`
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://api.riftmap.dev/api/v1/connected-orgs \
+  -H "X-API-Key: rfm_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "platform": "github",
+    "url": "https://github.com/my-org",
+    "access_token": "ghp_...",
+    "name": "My Org"
+  }'
+```
+
+</CodeGroup>
+
+### OAuth mode (session auth only)
+
+OAuth mode lets you connect an org using the GitHub or GitLab identity already linked to your Riftmap account, without supplying a separate PAT.
+
+<ParamField body="platform" type="string" required>
+  `"github"` or `"gitlab"`.
+</ParamField>
+
+<ParamField body="oauth_org_login" type="string" required>
+  The org slug or GitLab group path from `GET /workspaces/{id}/oauth-orgs/{provider}`.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Display name for the connection inside Riftmap.
+</ParamField>
+
+```json
+{ "platform": "github", "oauth_org_login": "my-org", "name": "My Org" }
+```
+
+<Note>
+OAuth mode is session auth only. API key callers must use PAT mode. For GitHub, OAuth mode requires your stored login token to include `repo` or `public_repo` scope. Tokens issued after the 2026-04-11 security update omit those scopes and will receive a `422` with guidance to use a PAT instead. GitLab OAuth tokens always work in OAuth mode.
+</Note>
+
+Returns `409` if the org is already registered in this workspace. Returns `403` if your email is unverified (API key auth is exempt).
+
+---
+
+## PUT /connected-orgs/{id} — update an existing org
+
+All body fields are optional. Only fields you include are updated.
+
+<ParamField body="name" type="string">
+  New display name for the connection.
+</ParamField>
+
+<ParamField body="access_token" type="string">
+  Rotate the stored PAT. Validated against the org's existing platform — must meet the same scope requirements as on creation.
+</ParamField>
+
+<ParamField body="heuristic_patterns" type="object">
+  Scan-time JSON heuristics for this org. Leave unset to keep existing patterns.
+</ParamField>
+
+<Warning>
+`platform`, `platform_id`, and `url` are immutable. Changing them would desync all scan results. To change the underlying org, delete this connection and register a new one.
+</Warning>
+
+<Warning>
+You cannot rotate the access token on an org that was connected via OAuth. If the org's stored token belongs to a linked user identity, the request returns `409`. Either re-login (which refreshes the identity token automatically) or disconnect the org and re-register it with a PAT.
+</Warning>
+
+---
+
+## DELETE /connected-orgs/{id}
+
+Deletes the connected org and cascade-deletes all associated repositories, scans, artifacts, and the encrypted access token from the database.
+
+<Warning>
+Riftmap does **not** revoke the PAT or OAuth token on GitHub or GitLab when you delete a connected org. You must revoke the token manually in your GitHub or GitLab settings.
+</Warning>
+
+---
+
+## GET /connected-orgs/{id}/stats
+
+Returns aggregate statistics for the org without needing to fetch the full graph.
+
+<ResponseField name="repo_count" type="number">
+  Total number of repositories discovered in this org.
+</ResponseField>
+
+<ResponseField name="artifact_count" type="number">
+  Number of distinct artifacts consumed within the org (canonical-name deduplicated).
+</ResponseField>
+
+<ResponseField name="total_dependencies" type="number">
+  Total dependency edges, deduplicated by `(source_repo, target, dependency_type)` — matches what the graph UI renders.
+</ResponseField>
+
+<ResponseField name="dependency_type_breakdown" type="object">
+  Per-type counts using the same deduplication key.
+</ResponseField>
+
+<ResponseField name="last_scan" type="object">
+  Summary of the most recent scan: status, started and finished timestamps, and repo counts.
+</ResponseField>

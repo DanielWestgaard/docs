@@ -1,0 +1,75 @@
+---
+title: "Authenticate requests to the Riftmap API with API keys"
+description: "Pass a workspace API key in the X-API-Key header or Authorization: Bearer to authenticate Riftmap API requests. Some endpoints require browser session auth."
+---
+
+Every request to the Riftmap API must be authenticated. For programmatic access — CI pipelines, scripts, and integrations — use a workspace API key. Browser-based sessions are set automatically when you log in through the Riftmap web app and are not intended for API use.
+
+## Workspace API keys
+
+A workspace API key is a long-lived credential that grants Owner-level access to your workspace. You can create and revoke keys from **Workspace Settings → API Keys**.
+
+API keys follow the format `rfm_live_...`. You can present the key in either of two ways:
+
+<CodeGroup>
+
+```bash X-API-Key header (preferred)
+curl -H "X-API-Key: rfm_live_YOUR_KEY" \
+  https://api.riftmap.dev/api/v1/workspaces
+```
+
+```bash Authorization: Bearer (CI-friendly alias)
+curl -H "Authorization: Bearer rfm_live_YOUR_KEY" \
+  https://api.riftmap.dev/api/v1/workspaces
+```
+
+</CodeGroup>
+
+<Tip>
+  The `X-API-Key` header is the canonical form. The `Authorization: Bearer` form is a convenience alias for CI systems that already use that header pattern. Bearer auth is only treated as an API key when the value starts with `rfm_` — other Bearer tokens (user JWTs) are not affected.
+</Tip>
+
+## Session cookies
+
+When you log in through the Riftmap web app, the server sets httponly session cookies automatically. The access token is short-lived (15 minutes) and is refreshed transparently using the 30-day refresh token. The browser sends these on every request to the same origin.
+
+Session cookies are not intended for programmatic use. If you send an API key alongside session cookies, the API key takes priority.
+
+## Priority order
+
+When a request includes multiple credentials, Riftmap resolves them in this order:
+
+1. `X-API-Key` header
+2. `Authorization: Bearer rfm_*` header
+3. Session cookie
+4. 401 Unauthorized
+
+## 401 response
+
+If no valid credential is found, the API returns:
+
+```json
+{"detail": "Authentication required. Provide X-API-Key, Authorization: Bearer <key>, or log in."}
+```
+
+## Session-only endpoints
+
+Some endpoints require a real logged-in user and return `403 Forbidden` when called with an API key. These endpoints manage personal account state that is tied to an individual user identity, not a workspace:
+
+| Method | Path |
+|---|---|
+| GET | `/auth/me` |
+| PATCH | `/auth/me` |
+| POST | `/auth/password/change` |
+| POST | `/auth/password/set` |
+| POST | `/auth/email/verify/resend` |
+| POST | `/auth/account/delete` |
+| GET | `/workspaces/{id}/oauth-orgs/{provider}` |
+
+<Note>
+  These endpoints are designed for browser-based flows. If you need to automate workspace configuration, use the API key-compatible endpoints for invitations, connected orgs, and scans instead.
+</Note>
+
+## Cross-workspace isolation
+
+Every API key is scoped to the workspace it was created in. Requests are automatically filtered to that workspace's resources. Attempting to access another workspace's resources returns `404 Not Found` — not `403 Forbidden` — to avoid leaking the existence of resources in other workspaces.

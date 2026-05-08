@@ -1,0 +1,96 @@
+---
+title: "How Riftmap scans your GitHub org or GitLab group repos"
+description: "A scan enumerates every repository in your connected org, parses dependency files across all ecosystems, and updates the dependency graph in your workspace."
+---
+
+When you trigger a scan, Riftmap's workers enumerate every repository in your connected GitHub org or GitLab group, clone each one (read-only), and walk the files. Ecosystem-specific parsers extract dependency declarations — `module` blocks in Terraform, `FROM` lines in Dockerfiles, `require` directives in `go.mod`, and so on. A heuristic scanner also catches references that formal parsers may miss, such as inline shell scripts or non-standard file layouts. The results are stored in your workspace's dependency graph, ready to query.
+
+## Full scans vs incremental scans
+
+Riftmap supports two scan types, which you choose when you trigger a scan.
+
+| Type | What it does | When to use it |
+|---|---|---|
+| **Full** | Re-processes every repository in the org from scratch | After connecting a new org, or when you want to ensure the graph reflects the latest state of all repos |
+| **Incremental** | Skips repositories that have not changed since the last successful scan | Day-to-day use — faster because most repos are unchanged |
+
+Incremental scans check each repository's last-activity timestamp against the previous scan. Repos with no new commits since then are skipped entirely. In a large org where only a handful of repos change per day, incremental scans finish significantly faster than full scans.
+
+<Tip>
+Run a full scan after connecting an org for the first time, or after a long gap where many repos may have changed. Use incremental scans for everything after that.
+</Tip>
+
+## Scan lifecycle
+
+Scans run as background jobs. You trigger one and then check back on its status — Riftmap does not make you wait in place for a scan to finish.
+
+```
+pending → running → completed
+                 ↘ failed
+```
+
+| Status | Meaning |
+|---|---|
+| `pending` | The scan has been queued and is waiting for a worker |
+| `running` | Workers are actively processing repositories |
+| `completed` | The scan finished and the graph has been updated |
+| `failed` | The scan encountered an error before completing |
+
+<Note>
+If a scan fails partway through, any repositories that were already processed before the failure are preserved. A subsequent scan picks up from where the previous one left off (for incremental) or re-processes everything (for full).
+</Note>
+
+## Triggering a scan
+
+<Steps>
+  <Step title="Go to your connected org">
+    From the sidebar, open **Connections** and select the org you want to scan.
+  </Step>
+  <Step title="Choose a scan type">
+    Click **Scan now** and select **Incremental** or **Full**.
+  </Step>
+  <Step title="Monitor progress">
+    The scan appears in the **Scans** tab with a live status indicator. Refresh or return to the tab to see when it completes.
+  </Step>
+</Steps>
+
+You can also trigger scans via the API:
+
+```bash
+curl -X POST https://api.riftmap.dev/api/v1/connected-orgs/{id}/scans \
+  -H "X-API-Key: rfm_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"scan_type": "incremental"}'
+```
+
+## Scan history
+
+Every scan is recorded with its type, status, start time, and summary of results. You can browse the history for any connected org in the UI under **Connections → [Org] → Scans**, or retrieve it via the API:
+
+```
+GET /api/v1/connected-orgs/{id}/scans
+```
+
+## What a scan finds
+
+<AccordionGroup>
+  <Accordion title="Repositories discovered">
+    Every repository visible to the access token you provided is enumerated. For a GitHub org, that means every repo the token can read. For a GitLab group, it includes all projects in the group and any subgroups.
+  </Accordion>
+  <Accordion title="Dependencies found">
+    For each repository, parsers extract dependency declarations — references to other repositories, packages, images, modules, charts, and so on. Each declaration records the file it came from, the line number, the raw reference string, and the resolved target (if Riftmap can match it to a known repo or artifact in your org).
+  </Accordion>
+  <Accordion title="Artifacts detected">
+    Some repositories produce publishable units — Docker images, Helm charts, Python packages, Go modules, Terraform modules, Ansible roles and collections, npm packages. Riftmap detects these automatically and uses them as intermediate nodes in the graph, linking the producer repo to every consumer repo.
+  </Accordion>
+</AccordionGroup>
+
+## Cancelling a scan
+
+You can cancel a scan that is `pending` or `running` from the Scans tab, or via the API:
+
+```
+POST /api/v1/scans/{id}/cancel
+```
+
+Results from repositories that were already processed before cancellation are preserved.

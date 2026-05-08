@@ -1,0 +1,82 @@
+---
+title: "Frequently asked questions about how Riftmap works"
+description: "Common questions about how Riftmap works, what permissions it needs, how it differs from Backstage and Renovate, data storage, self-hosted GitLab, and more."
+---
+
+Here you will find answers to the questions we hear most often. If you have a question that isn't covered here, check [Troubleshooting](/troubleshooting) or open an issue on [GitHub](https://github.com/DanielWestgaard/Riftmap).
+
+<AccordionGroup>
+  <Accordion title="Do I need to add config files to each repo?">
+    No. Riftmap requires zero per-repo configuration. You connect once at the org level with a read-only access token, and Riftmap discovers everything directly from the code — no YAML to write, no metadata files to maintain, nothing to keep up to date. The dependency graph reflects what is actually in your repos, not what someone declared in a side-car file.
+  </Accordion>
+
+  <Accordion title="What permissions does Riftmap need?">
+    Riftmap needs read-only access to your repositories. It never writes to your repos or requests any write permissions.
+
+    | Platform | Token type | Required permissions |
+    |---|---|---|
+    | GitHub | Fine-grained PAT (recommended) | Contents: Read-only, Metadata: Read-only |
+    | GitHub | Classic PAT | `repo`, `read:org` |
+    | GitLab | PAT | `read_api`, `read_repository` |
+
+    These are the minimum scopes needed to enumerate repositories and read file contents for parsing.
+  </Accordion>
+
+  <Accordion title="How often is the dependency graph updated?">
+    You control when scans run. There are two scan types:
+
+    - **Incremental scan** (default): checks which repositories have changed since the last scan (based on `last_activity_at`) and re-processes only those. Fast — typically completes in seconds for active orgs.
+    - **Full scan**: re-processes every repository from scratch. Use this after rotating a token, changing heuristic patterns, or when you suspect the graph is stale.
+
+    You can trigger scans manually in the app, via the API, or from a CI pipeline. Scheduled and webhook-triggered scans are on the roadmap for a future release.
+  </Accordion>
+
+  <Accordion title="How is Riftmap different from Backstage?">
+    Backstage is a developer portal that can show dependency relationships, but it relies on teams manually maintaining YAML files that declare what each service depends on. In practice, those files go stale within weeks — they reflect what someone thought was true when they wrote the YAML, not what the code actually does today.
+
+    Riftmap discovers dependencies automatically by reading the actual files in your repos — `terraform { module }` blocks, `FROM` instructions in Dockerfiles, `Chart.yaml` dependencies, `go.mod` requires, and so on. There is nothing to maintain. The graph reflects reality.
+  </Accordion>
+
+  <Accordion title="How is Riftmap different from Renovate or Dependabot?">
+    Renovate and Dependabot are dependency update tools: they watch for new versions and open pull requests to keep your dependencies current. They are reactive — they help you respond to upstream changes after they happen.
+
+    Riftmap is a visibility tool: it shows you the blast radius of a change *before* you publish it. When you are about to release a new version of a shared Terraform module or Docker base image, Riftmap tells you which repos consume it and at which version, so you know what to test before merging.
+
+    Both tools are valuable and complementary. Renovate keeps versions current; Riftmap shows you the downstream impact before you ship.
+  </Accordion>
+
+  <Accordion title="Does Riftmap store my source code?">
+    No. During a scan, Riftmap performs a shallow clone of each repository (`--depth 1`) to read file contents, then deletes the clone immediately after parsing. Only the extracted dependency declarations and resolved graph edges are stored — not the source code, file contents, or commit history.
+  </Accordion>
+
+  <Accordion title="What is an artifact?">
+    An artifact is a publishable unit that a repository produces: a Docker image, a Terraform module, a Helm chart, an npm package, a Python package, an Ansible role or collection, or a Go module. Riftmap detects what each repository produces and maps consumer repositories to their producers.
+
+    This powers the consumer-side view: for any artifact, you can query `GET /artifacts/{id}/consumers` to see every repository that depends on it and the version they are pinned to. This is the "who is using my Terraform module and are they up to date?" query that Riftmap is built around.
+  </Accordion>
+
+  <Accordion title="Can I use Riftmap with a self-hosted GitLab instance?">
+    Yes. When connecting an org, set the URL to your self-hosted GitLab instance and group path — for example, `https://gitlab.company.com/my-group`. Riftmap uses the GitLab API at the URL you provide, so it works with any GitLab instance as long as the access token has the required scopes (`read_api`, `read_repository`).
+  </Accordion>
+
+  <Accordion title="What does the confidence score on a dependency mean?">
+    The confidence score indicates how the dependency was resolved:
+
+    - **1.0** — exact match. The dependency was resolved via a direct, unambiguous match (for example, a git URL that maps directly to a known repository).
+    - **Less than 1.0** — heuristic or naming-convention-based resolution. Riftmap matched the dependency to a repository or artifact using pattern matching rather than an exact reference.
+
+    Unresolved dependencies (where no match could be found) are stored in the database but do not become edges in the graph. They appear in `GET /repositories/{id}/dependencies` with `resolved: false` and no target fields.
+  </Accordion>
+
+  <Accordion title="How do I export my data?">
+    You can export all workspace data as a JSON file at any time using the data portability endpoint:
+
+    ```bash
+    GET /api/v1/workspaces/{id}/export
+    ```
+
+    The export includes members, connected orgs (without access tokens), repositories, scans, dependency declarations, and resolved graph edges. It requires owner or admin role and is rate-limited to one export per workspace per hour.
+
+    See [Plans, limits, and billing management](/configuration/billing) for more details on the export endpoint.
+  </Accordion>
+</AccordionGroup>
